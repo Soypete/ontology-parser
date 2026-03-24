@@ -6,6 +6,44 @@ This file provides guidance for AI agents working in this repository.
 
 This is a Go library for parsing and analyzing RDF/OWL/TTL ontology files. The module is `github.com/soypete/ontology-go` with packages in the root directory: `rdf`, `store`, `sparql`, `ttl`, `fetch`, `types`.
 
+## Workflow Guidelines
+
+### Atomic Changes and Pull Requests
+
+All changes should be atomic and submitted via pull requests:
+
+1. **Create a feature branch** for each logical change:
+   ```bash
+   git checkout -b feature/add-sparql-support
+   ```
+
+2. **Make your changes** and commit with descriptive messages:
+   ```bash
+   git add <files>
+   git commit -m "Add SPARQL query engine implementation"
+   ```
+
+3. **Push and create PR**:
+   ```bash
+   git push -u origin feature/add-sparql-support
+   gh pr create --title "Add SPARQL query engine" --body "..."
+   ```
+
+4. **Wait for CI** to pass before requesting review
+
+5. **Never push directly to main** - always use PRs
+
+### Package Structure
+
+```
+/rdf/             # RDF/OWL parsing (XML format)
+/store/           # Triple storage interfaces and implementations
+/sparql/          # SPARQL query support
+/ttl/             # Turtle format parsing
+/fetch/           # Remote ontology fetching
+/types/           # Core RDF type definitions
+```
+
 ## TBOX/ABOX Mapping
 
 This library supports mapping relational data to RDF triples using YAML configuration:
@@ -22,10 +60,10 @@ This library supports mapping relational data to RDF triples using YAML configur
 go test ./...
 
 # Run tests for a specific package
-go test ./pkg/rdf/...
+go test ./rdf/...
 
 # Run a single test function
-go test -run TestNewPKOFromConfig ./pkg/rdf/...
+go test -run TestXMLParser ./rdf/...
 
 # Run tests with verbose output
 go test -v ./...
@@ -35,6 +73,26 @@ go test -cover ./...
 
 # Run tests with race detector
 go test -race ./...
+```
+
+### Building
+
+```bash
+# Build the library
+go build ./...
+
+# Build specific packages
+go build ./rdf/...
+```
+
+### Linting and Formatting
+
+```bash
+# Format code (use gofmt)
+gofmt -w ./rdf/
+
+# Check formatting without modifying
+gofmt -d ./rdf/
 ```
 
 ### Building
@@ -249,35 +307,4 @@ pko, err := pkordf.NewPKOFromConfig(config, reader,
 ```go
 p.logger.Info("triple generation complete", "count", p.store.Count())
 p.logger.Debug("processing table", "table", tableName)
-```
-
-## Package Structure
-
-```
-pkg/rdf/
-├── pko.go           # Main PKO processor
-├── pko_test.go      # Tests for PKO
-├── triplestore/     # Triple storage interfaces and implementations
-│   ├── store.go     # Store interface
-│   ├── memory.go    # In-memory implementation
-│   ├── turtle.go    # Turtle format export
-│   └── ntriples.go  # N-Triples format export
-├── mapping/         # YAML mapping configuration
-│   ├── mapping.go   # Config loading and validation
-│   └── types.go     # Configuration types
-├── transform/       # Row transformation engine
-│   ├── engine.go    # Transformation logic
-│   └── template.go  # Template processing
-├── db/              # Database reader interfaces
-│   ├── reader.go    # TableReader interface
-│   └── scanner.go   # Row scanning utilities
-├── sparql/          # SPARQL query support
-│   ├── query.go     # Query executor
-│   └── parser.go    # SPARQL parser
-├── llm/             # LLM enrichment (optional)
-│   ├── enricher.go  # LLM enrichment interface
-│   └── prompt.go    # Prompt templates
-└── examples/        # Usage examples
-    ├── basic/       # Basic usage
-    └── with_llm/    # LLM enrichment example
 ```
