@@ -1,4 +1,23 @@
-// Package types provides core RDF types.
+// Package types provides core RDF types and constants for the ontology-parser
+// library.
+//
+// This package defines the fundamental data structures used across all packages,
+// including Triple for RDF statements, Resource for fetched URI content, and
+// QueryResult for SPARQL query outputs. It also provides RDF vocabulary
+// constants like RDFNS and RDFType for common predicates.
+//
+// The types are designed to be serializable (JSON tags) and compatible with
+// standard RDF data models. The Triple struct supports named graphs via the
+// Graph field, enabling dataset-level organization.
+//
+// Example:
+//
+//	triple := types.Triple{
+//	    Subject:   "https://example.org/person/1",
+//	    Predicate: "rdf:type",
+//	    Object:    "schema:Person",
+//	    Graph:     "https://example.org/data",
+//	}
 package types
 
 const (

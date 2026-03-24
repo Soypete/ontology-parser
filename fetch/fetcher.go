@@ -1,5 +1,23 @@
 // Package fetch provides a resource fetcher for URI objects in RDF triples.
-// Fetching is opt-in and never recursive — only one hop is performed per URI.
+//
+// This package provides HTTP-based retrieval of resources referenced by URI
+// objects in RDF triples. Fetching is opt-in and never recursive — only one
+// hop is performed per URI. This is useful for linked data enrichment and
+// ontology inference from external sources.
+//
+// The Fetcher supports configurable timeouts via the WithTimeout option and
+// returns types.Resource containing the response body, content type, or any
+// errors encountered. It's designed to work alongside the rdf and ttl parsers
+// for processing external ontology references.
+//
+// Example:
+//
+//	fetcher := fetch.New(fetch.WithTimeout(5*time.Second))
+//	resource, err := fetcher.FetchURI("https://example.org/ontology.rdf")
+//	if err != nil {
+//	    // handle error
+//	}
+//	fmt.Println(string(resource.Body))
 package fetch
 
 import (

@@ -1,4 +1,21 @@
 // Package query provides SPARQL query execution against a triple store.
+//
+// This package implements a SPARQL query engine that executes queries against
+// a store.Store implementation. It supports SELECT queries with variable bindings,
+// pattern matching, and filter expressions. Results are returned as variable
+// bindings (map of variable names to values) and/or matching triples.
+//
+// The query engine parses SPARQL strings into an internal query representation
+// using the package's Parse function, then executes against the provided store.
+// It's designed to work with any implementation of the store.Store interface.
+//
+// Example:
+//
+//	engine := sparql.NewEngine(store)
+//	result, err := engine.Execute("SELECT ?s ?p ?o WHERE { ?s ?p ?o }")
+//	for _, binding := range result.Bindings {
+//	    fmt.Println(binding["s"], binding["p"], binding["o"])
+//	}
 package query
 
 import (

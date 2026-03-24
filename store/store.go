@@ -1,5 +1,25 @@
 // Package store provides interfaces and implementations for RDF triple storage
 // organized by named graphs.
+//
+// This package defines the Store interface for RDF triple persistence and provides
+// a MemoryStore implementation for in-memory storage. Named graphs allow organizing
+// triples into separate contexts, enabling use cases like TBOX/ABOX separation
+// and dataset versioning.
+//
+// The Store interface supports:
+//   - Register: Add triples to a named graph
+//   - Remove: Delete an entire graph
+//   - List: Enumerate all graphs
+//   - All: Retrieve all triples across graphs
+//   - Match: Pattern-match triples by subject/predicate/object
+//
+// Example:
+//
+//	store := store.NewMemoryStore()
+//	store.Register("products", []types.Triple{
+//	    {Subject: "https://example.org/product/1", Predicate: "rdf:type", Object: "schema:Product"},
+//	})
+//	triples := store.Match("", "rdf:type", "schema:Product")
 package store
 
 import (

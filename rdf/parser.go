@@ -1,4 +1,18 @@
 // Package rdf provides RDF/OWL ontology parsing functionality.
+//
+// This package supports parsing RDF/XML, Turtle (TTL), and OWL ontology files
+// into RDF triples. It provides a Parser interface for extensible format support,
+// with an XMLParser implementation for RDF/XML documents.
+//
+// Triples are represented using the types.Triple struct and can be stored in
+// a store.Store for querying. This package is typically used alongside the ttl
+// and sparql packages for complete ontology workflow support.
+//
+// Example:
+//
+//	parser := rdf.NewXMLParser("https://example.org/graph")
+//	triples, err := parser.Parse(file)
+//	// Use triples with store.Store
 package rdf
 
 import (

@@ -1,4 +1,30 @@
 // Package ttl provides W3C Turtle format parsing functionality.
+//
+// This package implements a parser for the W3C Turtle (TTL) RDF serialization
+// format. Turtle is a compact, human-readable syntax for representing RDF graphs.
+//
+// Supported features:
+//   - @prefix declarations for prefixed names
+//   - @base for relative IRI resolution
+//   - Full IRIs in angle brackets <...>
+//   - Prefixed names (e.g., rdf:type, schema:Person)
+//   - Predicate lists (;) for sharing subjects
+//   - Object lists (,) for sharing predicates
+//   - 'a' shorthand for rdf:type
+//   - Blank nodes (_:label and [] syntax)
+//   - String literals (quoted, triple-quoted, multiline)
+//   - Typed literals (^^datatype)
+//   - Language-tagged literals (@en, @de, etc.)
+//   - Numeric and boolean literals
+//
+// Example:
+//
+//	parser := ttl.NewTurtleParser()
+//	parser.Graph = "https://example.org/data"
+//	triples, err := parser.Parse(reader)
+//	for _, t := range triples {
+//	    fmt.Println(t.Subject, t.Predicate, t.Object)
+//	}
 package ttl
 
 import (
