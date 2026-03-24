@@ -13,7 +13,7 @@ linters:
     - unused
     - misspell
 
-linters-settings:
+settings:
   errcheck:
     check-type-assertions: false
     check-blank: false
