@@ -61,7 +61,8 @@ ex:math101 a skos:Concept ;
 ex:physics101 a skos:Concept ;
     skos:prefLabel "Physics 101"@en ;
     skos:broader ex:course ;
-    skos:exactMatch wd:Q41301 .
+    skos:exactMatch wd:Q41301 ;
+    skos:closeMatch wd:Q395 .
 
 # Test transitive exactMatch: a exactMatch b, b exactMatch c should infer a exactMatch c
 ex:conceptA a skos:Concept ;
@@ -84,9 +85,8 @@ ex:orderedSubjects a skos:OrderedCollection ;
     skos:prefLabel "Ordered Subjects"@en ;
     skos:memberList ( ex:course ex:student ex:MOOC ) .
 
-# Documentation properties
-ex:course a skos:Concept ;
-    skos:note "A structured learning experience"@en ;
+# Add documentation properties to existing ex:course
+ex:course skos:note "A structured learning experience"@en ;
     skos:definition "An organized set of learning activities"@en ;
     skos:scopeNote "Use for both online and offline courses"@en .
 

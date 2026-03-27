@@ -151,6 +151,12 @@ func (e *Engine) inferBroaderNarrower(triples []types.Triple, inverse bool) []ty
 	graphMap := make(map[string]map[string][]string)
 	for _, t := range triples {
 		if t.Predicate == broaderPred {
+			inferred = append(inferred, types.Triple{
+				Subject:   t.Subject,
+				Predicate: narrowerPred,
+				Object:    t.Object,
+				Graph:     t.Graph,
+			})
 			if _, ok := graphMap[t.Graph]; !ok {
 				graphMap[t.Graph] = make(map[string][]string)
 			}
@@ -180,16 +186,15 @@ func (e *Engine) computeTransitiveBroader(subjectMap map[string][]string, broade
 		defer delete(path, current)
 
 		for _, broader := range subjectMap[current] {
-			inferred = append(inferred, types.Triple{
-				Subject:   originalSubject,
-				Predicate: narrowerPred,
-				Object:    broader,
-				Graph:     graph,
-			})
-
 			pairKey := originalSubject + "|" + broader
 			if !visitedPairs[pairKey] {
 				visitedPairs[pairKey] = true
+				inferred = append(inferred, types.Triple{
+					Subject:   originalSubject,
+					Predicate: broaderPred,
+					Object:    broader,
+					Graph:     graph,
+				})
 				dfs(originalSubject, broader, path)
 			}
 		}
@@ -289,16 +294,18 @@ func (e *Engine) inferExactMatch(triples []types.Triple) []types.Triple {
 func (e *Engine) inferCloseMatch(triples []types.Triple) []types.Triple {
 	var inferred []types.Triple
 
-	matchMap := make(map[string][]string)
+	directMatches := make(map[string][]string)
+	resourceToConcepts := make(map[string][]string)
 
 	for _, t := range triples {
 		if t.Predicate == SKOSCloseMatch {
-			matchMap[t.Subject] = append(matchMap[t.Subject], t.Object)
+			directMatches[t.Object] = append(directMatches[t.Object], t.Subject)
+			resourceToConcepts[t.Object] = append(resourceToConcepts[t.Object], t.Subject)
 		}
 	}
 
-	for sub, matches := range matchMap {
-		for _, obj := range matches {
+	for obj, subjects := range directMatches {
+		for _, sub := range subjects {
 			inferred = append(inferred, types.Triple{
 				Subject:   sub,
 				Predicate: SKOSExactMatch,
@@ -312,6 +319,29 @@ func (e *Engine) inferCloseMatch(triples []types.Triple) []types.Triple {
 				Graph:     "",
 			})
 		}
+	}
+
+	for resource, concepts := range resourceToConcepts {
+		if len(concepts) < 2 {
+			continue
+		}
+		for i := 0; i < len(concepts); i++ {
+			for j := i + 1; j < len(concepts); j++ {
+				inferred = append(inferred, types.Triple{
+					Subject:   concepts[i],
+					Predicate: SKOSExactMatch,
+					Object:    concepts[j],
+					Graph:     "",
+				})
+				inferred = append(inferred, types.Triple{
+					Subject:   concepts[j],
+					Predicate: SKOSExactMatch,
+					Object:    concepts[i],
+					Graph:     "",
+				})
+			}
+		}
+		_ = resource
 	}
 
 	return inferred

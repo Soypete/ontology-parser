@@ -144,18 +144,27 @@ func TestEngine_inferBroaderNarrower_Broader(t *testing.T) {
 	}
 
 	result := engine.inferBroaderNarrower(triples, false)
-	if len(result) != 1 {
-		t.Fatalf("expected 1 inferred triple, got %d", len(result))
+	if len(result) != 2 {
+		t.Fatalf("expected 2 inferred triples (direct + transitive), got %d", len(result))
 	}
 
-	if result[0].Predicate != SKOSNarrower {
-		t.Errorf("expected predicate %s, got %s", SKOSNarrower, result[0].Predicate)
+	foundDirect := false
+	foundTransitive := false
+	for _, tr := range result {
+		if tr.Subject == "http://example.org/child" && tr.Object == "http://example.org/parent" {
+			if tr.Predicate == SKOSNarrower {
+				foundDirect = true
+			}
+			if tr.Predicate == SKOSBroader {
+				foundTransitive = true
+			}
+		}
 	}
-	if result[0].Subject != "http://example.org/child" {
-		t.Errorf("expected subject child, got %s", result[0].Subject)
+	if !foundDirect {
+		t.Error("expected direct narrower inference")
 	}
-	if result[0].Object != "http://example.org/parent" {
-		t.Errorf("expected object parent, got %s", result[0].Object)
+	if !foundTransitive {
+		t.Error("expected transitive broader inference")
 	}
 }
 
@@ -168,12 +177,27 @@ func TestEngine_inferBroaderNarrower_Narrower(t *testing.T) {
 	}
 
 	result := engine.inferBroaderNarrower(triples, true)
-	if len(result) != 1 {
-		t.Fatalf("expected 1 inferred triple, got %d", len(result))
+	if len(result) != 2 {
+		t.Fatalf("expected 2 inferred triples (direct + transitive), got %d", len(result))
 	}
 
-	if result[0].Predicate != SKOSBroader {
-		t.Errorf("expected predicate %s, got %s", SKOSBroader, result[0].Predicate)
+	foundDirect := false
+	foundTransitive := false
+	for _, tr := range result {
+		if tr.Subject == "http://example.org/parent" && tr.Object == "http://example.org/child" {
+			if tr.Predicate == SKOSBroader {
+				foundDirect = true
+			}
+			if tr.Predicate == SKOSNarrower {
+				foundTransitive = true
+			}
+		}
+	}
+	if !foundDirect {
+		t.Error("expected direct broader inference")
+	}
+	if !foundTransitive {
+		t.Error("expected transitive narrower inference")
 	}
 }
 
@@ -189,7 +213,7 @@ func TestEngine_inferBroaderNarrower_Transitive(t *testing.T) {
 	result := engine.inferBroaderNarrower(triples, false)
 	found := false
 	for _, t := range result {
-		if t.Subject == "http://example.org/grandchild" && t.Predicate == SKOSNarrower && t.Object == "http://example.org/parent" {
+		if t.Subject == "http://example.org/grandchild" && t.Predicate == SKOSBroader && t.Object == "http://example.org/parent" {
 			found = true
 			break
 		}
@@ -443,7 +467,7 @@ func TestEngine_computeTransitiveBroader(t *testing.T) {
 
 	found := false
 	for _, t := range result {
-		if t.Subject == "http://example.org/child" && t.Object == "http://example.org/grandparent" && t.Predicate == SKOSNarrower {
+		if t.Subject == "http://example.org/child" && t.Object == "http://example.org/grandparent" && t.Predicate == SKOSBroader {
 			found = true
 			break
 		}
@@ -741,8 +765,24 @@ func TestSKOSIntegration_FromTTLFile(t *testing.T) {
 			t.Fatalf("query failed: %v", err)
 		}
 
+		// First, check raw bindings without aggregate
+		rawResult, _ := engine.Execute(`
+			PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+			SELECT ?collection ?member WHERE {
+				?collection a skos:Collection .
+				?collection skos:member ?member .
+			}
+		`)
+		t.Logf("Raw bindings count: %d", len(rawResult.Bindings))
+		for i, b := range rawResult.Bindings {
+			t.Logf("Raw binding %d: %+v", i, b)
+		}
+
+		t.Logf("Collection results: %+v", result.Bindings)
+
 		hasStemWith2Members := false
 		for _, b := range result.Bindings {
+			t.Logf("Binding: %+v", b)
 			if b["collection"] == "http://example.org/stemSubjects" && b["memberCount"] == "2" {
 				hasStemWith2Members = true
 				break
