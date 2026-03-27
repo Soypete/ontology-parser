@@ -1,0 +1,96 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix ex: <http://example.org/> .
+@prefix wd: <https://www.wikidata.org/entity/> .
+
+# Concept Scheme
+ex:education a skos:ConceptScheme ;
+    rdfs:label "Education Thesaurus"@en ;
+    skos:hasTopConcept ex:course, ex:student .
+
+# Top Concepts
+ex:course a skos:Concept ;
+    skos:prefLabel "Course"@en ;
+    skos:altLabel "Class"@en ;
+    skos:notation "EDU-001" ;
+    skos:inScheme ex:education ;
+    skos:topConceptOf ex:education ;
+    skos:narrower ex:onlineCourse, ex:offlineCourse .
+
+ex:student a skos:Concept ;
+    skos:prefLabel "Student"@en ;
+    skos:altLabel "Learner"@en ;
+    skos:notation "EDU-002" ;
+    skos:inScheme ex:education ;
+    skos:topConceptOf ex:education .
+
+# Sub-concepts for testing transitive broader inference
+ex:onlineCourse a skos:Concept ;
+    skos:prefLabel "Online Course"@en ;
+    skos:broader ex:course ;
+    skos:related ex:MOOC ;
+    skos:narrower ex:selfPaced, ex:instructorLed .
+
+ex:offlineCourse a skos:Concept ;
+    skos:prefLabel "Offline Course"@en ;
+    skos:broader ex:course ;
+    skos:related ex:MOOC .
+
+# Further nested for transitive inference
+ex:selfPaced a skos:Concept ;
+    skos:prefLabel "Self-Paced Course"@en ;
+    skos:broader ex:onlineCourse .
+
+ex:instructorLed a skos:Concept ;
+    skos:prefLabel "Instructor-Led Course"@en ;
+    skos:broader ex:onlineCourse .
+
+# Related concepts (symmetric)
+ex:MOOC a skos:Concept ;
+    skos:prefLabel "MOOC"@en ;
+    skos:related ex:onlineCourse, ex:offlineCourse .
+
+# Cross-vocabulary mapping for testing exactMatch/closeMatch inference
+ex:math101 a skos:Concept ;
+    skos:prefLabel "Mathematics 101"@en ;
+    skos:broader ex:course ;
+    skos:exactMatch wd:Q11660 ;
+    skos:closeMatch wd:Q395 .
+
+ex:physics101 a skos:Concept ;
+    skos:prefLabel "Physics 101"@en ;
+    skos:broader ex:course ;
+    skos:exactMatch wd:Q41301 .
+
+# Test transitive exactMatch: a exactMatch b, b exactMatch c should infer a exactMatch c
+ex:conceptA a skos:Concept ;
+    skos:prefLabel "Concept A"@en ;
+    skos:exactMatch ex:conceptB .
+
+ex:conceptB a skos:Concept ;
+    skos:prefLabel "Concept B"@en ;
+    skos:exactMatch ex:conceptC .
+
+ex:conceptC a skos:Concept ;
+    skos:prefLabel "Concept C"@en .
+
+# Collection test
+ex:stemSubjects a skos:Collection ;
+    skos:prefLabel "STEM Subjects"@en ;
+    skos:member ex:course, ex:student .
+
+ex:orderedSubjects a skos:OrderedCollection ;
+    skos:prefLabel "Ordered Subjects"@en ;
+    skos:memberList ( ex:course ex:student ex:MOOC ) .
+
+# Documentation properties
+ex:course a skos:Concept ;
+    skos:note "A structured learning experience"@en ;
+    skos:definition "An organized set of learning activities"@en ;
+    skos:scopeNote "Use for both online and offline courses"@en .
+
+# Hidden label for search
+ex:math101 a skos:Concept ;
+    skos:hiddenLabel "math"@en ;
+    skos:hiddenLabel "mathematics"@en .

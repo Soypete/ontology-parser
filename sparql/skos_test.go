@@ -1,9 +1,11 @@
 package query
 
 import (
+	"os"
 	"testing"
 
 	"github.com/soypete/ontology-go/store"
+	"github.com/soypete/ontology-go/ttl"
 	"github.com/soypete/ontology-go/types"
 )
 
@@ -579,4 +581,190 @@ func TestEngine_Execute_WithAuthorityMatch(t *testing.T) {
 	}
 
 	t.Logf("Authority match results: %d bindings", len(result.Bindings))
+}
+
+func TestSKOSIntegration_FromTTLFile(t *testing.T) {
+	f, err := os.Open("../testdata/skos.ttl")
+	if err != nil {
+		t.Skipf("SKOS test file not found: %v", err)
+	}
+	defer f.Close()
+
+	p := ttl.NewTurtleParser()
+	triples, err := p.Parse(f)
+	if err != nil {
+		t.Fatalf("failed to parse SKOS TTL: %v", err)
+	}
+
+	s := store.NewMemoryStore()
+	if err := s.Register("skos", triples); err != nil {
+		t.Fatalf("failed to register triples: %v", err)
+	}
+
+	engine := NewEngine(s, WithSKOSInference(SKOSInferenceAll))
+
+	t.Run("TransitiveBroaderInference", func(t *testing.T) {
+		result, err := engine.Execute(`
+			PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+			SELECT ?child ?ancestor WHERE {
+				?child skos:broader ?ancestor .
+			}
+		`)
+		if err != nil {
+			t.Fatalf("query failed: %v", err)
+		}
+
+		hasSelfPacedCourseToCourse := false
+		for _, b := range result.Bindings {
+			if b["child"] == "http://example.org/selfPaced" && b["ancestor"] == "http://example.org/course" {
+				hasSelfPacedCourseToCourse = true
+				break
+			}
+		}
+		if !hasSelfPacedCourseToCourse {
+			t.Error("expected transitive inference: selfPaced -> course via onlineCourse")
+		}
+	})
+
+	t.Run("SymmetricRelatedInference", func(t *testing.T) {
+		result, err := engine.Execute(`
+			PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+			SELECT ?a ?b WHERE {
+				?a skos:related ?b .
+			}
+		`)
+		if err != nil {
+			t.Fatalf("query failed: %v", err)
+		}
+
+		found := false
+		for _, b := range result.Bindings {
+			if (b["a"] == "http://example.org/onlineCourse" && b["b"] == "http://example.org/MOOC") ||
+				(b["a"] == "http://example.org/MOOC" && b["b"] == "http://example.org/onlineCourse") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("expected symmetric related inference")
+		}
+	})
+
+	t.Run("ExactMatchTransitiveInference", func(t *testing.T) {
+		result, err := engine.Execute(`
+			PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+			SELECT ?a ?c WHERE {
+				?a skos:exactMatch ?c .
+			}
+		`)
+		if err != nil {
+			t.Fatalf("query failed: %v", err)
+		}
+
+		hasAToC := false
+		for _, b := range result.Bindings {
+			if b["a"] == "http://example.org/conceptA" && b["c"] == "http://example.org/conceptC" {
+				hasAToC = true
+				break
+			}
+		}
+		if !hasAToC {
+			t.Error("expected transitive exactMatch inference: conceptA -> conceptC via conceptB")
+		}
+	})
+
+	t.Run("CloseMatchInference", func(t *testing.T) {
+		result, err := engine.Execute(`
+			PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+			SELECT ?s ?o WHERE {
+				?s skos:exactMatch ?o .
+			}
+		`)
+		if err != nil {
+			t.Fatalf("query failed: %v", err)
+		}
+
+		found := false
+		for _, b := range result.Bindings {
+			if b["s"] == "http://example.org/math101" && b["o"] == "http://example.org/physics101" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("expected closeMatch to infer exactMatch")
+		}
+	})
+
+	t.Run("ValidateSKOSConstants", func(t *testing.T) {
+		result, err := engine.Execute(`
+			PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+			SELECT (COUNT(?s) as ?count) WHERE {
+				?s a skos:Concept .
+			}
+		`)
+		if err != nil {
+			t.Fatalf("query failed: %v", err)
+		}
+		if len(result.Bindings) == 0 {
+			t.Fatal("no results for Concept count")
+		}
+		if result.Bindings[0]["count"] != "13" {
+			t.Errorf("expected 13 concepts, got %s", result.Bindings[0]["count"])
+		}
+	})
+
+	t.Run("ValidateConceptScheme", func(t *testing.T) {
+		result, err := engine.Execute(`
+			PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+			SELECT ?scheme WHERE {
+				?scheme a skos:ConceptScheme .
+			}
+		`)
+		if err != nil {
+			t.Fatalf("query failed: %v", err)
+		}
+		if len(result.Bindings) != 1 {
+			t.Errorf("expected 1 concept scheme, got %d", len(result.Bindings))
+		}
+	})
+
+	t.Run("ValidateCollection", func(t *testing.T) {
+		result, err := engine.Execute(`
+			PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+			SELECT ?collection (COUNT(?member) as ?memberCount) WHERE {
+				?collection a skos:Collection .
+				?collection skos:member ?member .
+			} GROUP BY ?collection
+		`)
+		if err != nil {
+			t.Fatalf("query failed: %v", err)
+		}
+
+		hasStemWith2Members := false
+		for _, b := range result.Bindings {
+			if b["collection"] == "http://example.org/stemSubjects" && b["memberCount"] == "2" {
+				hasStemWith2Members = true
+				break
+			}
+		}
+		if !hasStemWith2Members {
+			t.Error("expected Collection with 2 members")
+		}
+	})
+
+	t.Run("ValidateTopConcept", func(t *testing.T) {
+		result, err := engine.Execute(`
+			PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+			SELECT ?top WHERE {
+				?scheme skos:hasTopConcept ?top .
+			}
+		`)
+		if err != nil {
+			t.Fatalf("query failed: %v", err)
+		}
+		if len(result.Bindings) != 2 {
+			t.Errorf("expected 2 top concepts, got %d", len(result.Bindings))
+		}
+	})
 }
