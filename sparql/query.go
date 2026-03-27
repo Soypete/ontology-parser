@@ -29,12 +29,22 @@ import (
 
 // Engine executes SPARQL queries against a triple store.
 type Engine struct {
-	store store.Store
+	store       store.Store
+	skosOptions SKOSOptions
 }
 
 // NewEngine creates a new SPARQL query engine.
-func NewEngine(s store.Store) *Engine {
-	return &Engine{store: s}
+func NewEngine(s store.Store, opts ...EngineOption) *Engine {
+	e := &Engine{store: s, skosOptions: defaultSKOSOptions}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
+}
+
+// ApplyOption applies an engine option to the engine.
+func (e *Engine) ApplyOption(opt EngineOption) {
+	opt(e)
 }
 
 // Execute parses and executes a SPARQL query string, returning a QueryResult.
@@ -54,6 +64,9 @@ func (e *Engine) ExecuteParsed(q *ParsedQuery) (*types.QueryResult, error) {
 	}
 
 	allTriples := e.store.All()
+
+	// Apply SKOS inference if enabled
+	allTriples = e.inferSKOSTriples(allTriples)
 
 	// Match the basic graph pattern
 	bindings, matchedTriples, path := matchBGP(q.Where, allTriples)
