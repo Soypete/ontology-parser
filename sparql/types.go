@@ -19,17 +19,27 @@ const (
 	QuerySelect QueryType = iota
 )
 
+// AggregateExpression represents an aggregate function like COUNT, SUM, etc.
+type AggregateExpression struct {
+	Function string // COUNT, SUM, MIN, MAX, AVG
+	Variable string // the variable to aggregate
+	Alias    string // the alias for the result (e.g., ?count)
+	Distinct bool
+}
+
 // ParsedQuery represents a parsed SPARQL query.
 type ParsedQuery struct {
-	Type      QueryType
-	Variables []string // projected variables (nil = SELECT *)
-	Distinct  bool
-	Where     []TriplePattern
-	Optional  [][]TriplePattern // each inner slice is an OPTIONAL group
-	Filters   []Filter
-	Prefixes  map[string]string
-	Limit     int // 0 = no limit
-	Offset    int // 0 = no offset
+	Type       QueryType
+	Variables  []string // projected variables (nil = SELECT *)
+	Distinct   bool
+	Where      []TriplePattern
+	Optional   [][]TriplePattern // each inner slice is an OPTIONAL group
+	Filters    []Filter
+	Prefixes   map[string]string
+	Limit      int // 0 = no limit
+	Offset     int // 0 = no offset
+	Aggregates []AggregateExpression
+	GroupBy    []string
 }
 
 // TriplePattern represents a single triple pattern in a WHERE clause.

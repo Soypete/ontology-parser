@@ -46,8 +46,12 @@ func parsePrefixes(s string, prefixes map[string]string) string {
 func parseSelect(s string, q *ParsedQuery) (*ParsedQuery, error) {
 	q.Type = QuerySelect
 
-	// Match: SELECT [DISTINCT] <vars> WHERE
-	selectRe := regexp.MustCompile(`(?i)SELECT\s+(DISTINCT\s+)?(\*|(?:[\?\$]\w+\s*)+)\s+WHERE`)
+	// Parse aggregates first (e.g., (COUNT(?s) as ?count))
+	parseAggregates(s, q)
+
+	// Match: SELECT [DISTINCT] <vars> [WHERE|GROUP BY]
+	// More permissive regex that captures everything between SELECT and WHERE/GROUP BY
+	selectRe := regexp.MustCompile(`(?i)SELECT\s+(DISTINCT\s+)?(.+?)\s+(WHERE|GROUP BY)`)
 	m := selectRe.FindStringSubmatch(s)
 	if m == nil {
 		return nil, fmt.Errorf("invalid SELECT query: expected SELECT [DISTINCT] <variables> WHERE { ... }")
@@ -55,30 +59,51 @@ func parseSelect(s string, q *ParsedQuery) (*ParsedQuery, error) {
 
 	q.Distinct = strings.TrimSpace(m[1]) != ""
 
-	// Parse variables
+	// Parse variables (including aggregate aliases) from captured group
 	varsStr := strings.TrimSpace(m[2])
 	if varsStr == "*" {
 		q.Variables = nil // determined from patterns later
 	} else {
-		varRe := regexp.MustCompile(`[\?\$](\w+)`)
+		varRe := regexp.MustCompile(`[\?\$](\w+)|\(.*?\) as ([\?\$]\w+)`)
 		varMatches := varRe.FindAllStringSubmatch(varsStr, -1)
-		for _, vm := range varMatches {
-			q.Variables = append(q.Variables, vm[1])
+		if varMatches != nil {
+			// Handle both regular variables and aggregate aliases
+			for _, vm := range varMatches {
+				if vm[1] != "" {
+					q.Variables = append(q.Variables, vm[1])
+				} else if vm[2] != "" {
+					q.Variables = append(q.Variables, vm[2])
+				}
+			}
+		} else {
+			// Fallback: just extract all ?var patterns
+			simpleVarRe := regexp.MustCompile(`[\?\$](\w+)`)
+			simpleMatches := simpleVarRe.FindAllStringSubmatch(varsStr, -1)
+			for _, vm := range simpleMatches {
+				q.Variables = append(q.Variables, vm[1])
+			}
 		}
 	}
 
-	// Extract WHERE clause body
+	// Extract WHERE clause body (if present)
 	whereBody, remaining, err := extractBraceBlock(s, "WHERE")
 	if err != nil {
-		return nil, err
+		// If no WHERE, try to find GROUP BY directly
+		remaining = s
+		whereBody = ""
 	}
+
+	// Parse GROUP BY from remaining text
+	parseGroupBy(remaining, q)
 
 	// Parse LIMIT and OFFSET from remaining text after WHERE block
 	parseLimitOffset(remaining, q)
 
-	// Parse WHERE body: extract OPTIONAL blocks, FILTER clauses, and triple patterns
-	if err := parseWhereBody(whereBody, q); err != nil {
-		return nil, err
+	// Parse WHERE body if present
+	if whereBody != "" {
+		if err := parseWhereBody(whereBody, q); err != nil {
+			return nil, err
+		}
 	}
 
 	// If SELECT *, collect variables from all patterns
@@ -88,6 +113,22 @@ func parseSelect(s string, q *ParsedQuery) (*ParsedQuery, error) {
 			vars = append(vars, collectVariablesFromPatterns(opt)...)
 		}
 		q.Variables = dedupStrings(vars)
+	}
+
+	// Also add aggregate aliases to variables if not already present (strip the ? or $ prefix)
+	for _, agg := range q.Aggregates {
+		found := false
+		aliasName := strings.TrimPrefix(agg.Alias, "?")
+		aliasName = strings.TrimPrefix(aliasName, "$")
+		for _, v := range q.Variables {
+			if v == aliasName {
+				found = true
+				break
+			}
+		}
+		if !found && agg.Alias != "" {
+			q.Variables = append(q.Variables, aliasName)
+		}
 	}
 
 	return q, nil
@@ -452,6 +493,48 @@ func expandTerm(term string, prefixes map[string]string) string {
 	}
 
 	return term
+}
+
+// parseAggregates extracts aggregate expressions like (COUNT(?s) as ?count)
+func parseAggregates(s string, q *ParsedQuery) {
+	// Match: (COUNT(?var) as ?alias), (SUM(?var) as ?alias), etc.
+	aggRe := regexp.MustCompile(`(?i)\((COUNT|SUM|MIN|MAX|AVG)\s*\(\s*([\?\$]\w+)\s*\)\s+as\s+([\?\$]\w+)\)`)
+	matches := aggRe.FindAllStringSubmatch(s, -1)
+	for _, m := range matches {
+		agg := AggregateExpression{
+			Function: strings.ToUpper(m[1]),
+			Variable: m[2],
+			Alias:    m[3],
+		}
+		q.Aggregates = append(q.Aggregates, agg)
+	}
+
+	// Also handle DISTINCT in aggregates: (COUNT(DISTINCT ?var) as ?alias)
+	aggDistinctRe := regexp.MustCompile(`(?i)\((COUNT|SUM|MIN|MAX|AVG)\s*\(\s*DISTINCT\s+([\?\$]\w+)\s*\)\s+as\s+([\?\$]\w+)\)`)
+	distinctMatches := aggDistinctRe.FindAllStringSubmatch(s, -1)
+	for _, m := range distinctMatches {
+		agg := AggregateExpression{
+			Function: strings.ToUpper(m[1]),
+			Variable: m[2],
+			Alias:    m[3],
+			Distinct: true,
+		}
+		q.Aggregates = append(q.Aggregates, agg)
+	}
+}
+
+// parseGroupBy extracts GROUP BY variables
+func parseGroupBy(s string, q *ParsedQuery) {
+	groupByRe := regexp.MustCompile(`(?i)GROUP BY\s+(.+?)(?:LIMIT|OFFSET|$)`)
+	m := groupByRe.FindStringSubmatch(s)
+	if m != nil {
+		groupByVars := strings.TrimSpace(m[1])
+		varRe := regexp.MustCompile(`[\?\$](\w+)`)
+		varMatches := varRe.FindAllStringSubmatch(groupByVars, -1)
+		for _, vm := range varMatches {
+			q.GroupBy = append(q.GroupBy, vm[1])
+		}
+	}
 }
 
 func parseLimitOffset(s string, q *ParsedQuery) {

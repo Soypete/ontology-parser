@@ -21,6 +21,7 @@ package query
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/soypete/ontology-go/store"
@@ -29,12 +30,22 @@ import (
 
 // Engine executes SPARQL queries against a triple store.
 type Engine struct {
-	store store.Store
+	store       store.Store
+	skosOptions SKOSOptions
 }
 
 // NewEngine creates a new SPARQL query engine.
-func NewEngine(s store.Store) *Engine {
-	return &Engine{store: s}
+func NewEngine(s store.Store, opts ...EngineOption) *Engine {
+	e := &Engine{store: s, skosOptions: defaultSKOSOptions}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
+}
+
+// ApplyOption applies an engine option to the engine.
+func (e *Engine) ApplyOption(opt EngineOption) {
+	opt(e)
 }
 
 // Execute parses and executes a SPARQL query string, returning a QueryResult.
@@ -55,6 +66,9 @@ func (e *Engine) ExecuteParsed(q *ParsedQuery) (*types.QueryResult, error) {
 
 	allTriples := e.store.All()
 
+	// Apply SKOS inference if enabled
+	allTriples = e.inferSKOSTriples(allTriples)
+
 	// Match the basic graph pattern
 	bindings, matchedTriples, path := matchBGP(q.Where, allTriples)
 
@@ -68,8 +82,18 @@ func (e *Engine) ExecuteParsed(q *ParsedQuery) (*types.QueryResult, error) {
 		bindings = applyFilter(bindings, f)
 	}
 
-	// Apply DISTINCT
-	if q.Distinct {
+	// Apply GROUP BY
+	if len(q.GroupBy) > 0 {
+		bindings = applyGroupBy(bindings, q.GroupBy)
+	}
+
+	// Apply aggregates
+	if len(q.Aggregates) > 0 {
+		bindings = applyAggregates(bindings, q.Aggregates, q.GroupBy, q.Distinct)
+	}
+
+	// Apply DISTINCT (after aggregates)
+	if q.Distinct && len(q.Aggregates) == 0 {
 		bindings = distinct(bindings, q.Variables)
 	}
 
@@ -277,4 +301,170 @@ func copyBinding(b map[string]string) map[string]string {
 		nb[k] = v
 	}
 	return nb
+}
+
+func applyGroupBy(bindings []map[string]string, groupByVars []string) []map[string]string {
+	if len(groupByVars) == 0 {
+		return bindings
+	}
+
+	groups := make(map[string][]map[string]string)
+	for _, binding := range bindings {
+		key := makeKey(binding, groupByVars)
+		groups[key] = append(groups[key], binding)
+	}
+
+	var result []map[string]string
+	for _, group := range groups {
+		if len(group) == 0 {
+			continue
+		}
+		result = append(result, group...)
+	}
+	return result
+}
+
+func makeKey(binding map[string]string, vars []string) string {
+	var parts []string
+	for _, v := range vars {
+		parts = append(parts, binding[v])
+	}
+	return strings.Join(parts, "\x00")
+}
+
+func mergeBindingGroup(group []map[string]string, groupByVars []string) map[string]string {
+	merged := make(map[string]string)
+	for _, g := range group {
+		for k, v := range g {
+			if _, exists := merged[k]; !exists {
+				merged[k] = v
+			}
+		}
+	}
+	return merged
+}
+
+func applyAggregates(bindings []map[string]string, aggregates []AggregateExpression, groupByVars []string, distinct bool) []map[string]string {
+	if len(aggregates) == 0 {
+		return bindings
+	}
+
+	if len(groupByVars) == 0 {
+		var result []map[string]string
+		merged := mergeBindingGroup(bindings, nil)
+		for _, agg := range aggregates {
+			aliasName := strings.TrimPrefix(agg.Alias, "?")
+			aliasName = strings.TrimPrefix(aliasName, "$")
+			merged[aliasName] = computeAggregate(bindings, agg)
+		}
+		result = append(result, merged)
+		return result
+	}
+
+	groups := make(map[string][]map[string]string)
+	for _, binding := range bindings {
+		key := makeKey(binding, groupByVars)
+		groups[key] = append(groups[key], binding)
+	}
+
+	var result []map[string]string
+	for _, group := range groups {
+		merged := mergeBindingGroup(group, groupByVars)
+		for _, agg := range aggregates {
+			aliasName := strings.TrimPrefix(agg.Alias, "?")
+			aliasName = strings.TrimPrefix(aliasName, "$")
+			merged[aliasName] = computeAggregate(group, agg)
+		}
+		result = append(result, merged)
+	}
+	return result
+}
+
+func computeAggregate(group []map[string]string, agg AggregateExpression) string {
+	var values []string
+	var numericValues []float64
+
+	// Debug: check what variable we're looking for
+	varKey := strings.TrimPrefix(agg.Variable, "?")
+	varKey = strings.TrimPrefix(varKey, "$")
+
+	for _, binding := range group {
+		if val, ok := binding[varKey]; ok {
+			values = append(values, val)
+			if f, err := strconv.ParseFloat(val, 64); err == nil {
+				numericValues = append(numericValues, f)
+			}
+		}
+	}
+
+	if agg.Distinct {
+		seen := make(map[string]bool)
+		var uniqueValues []string
+		for _, v := range values {
+			if !seen[v] {
+				seen[v] = true
+				uniqueValues = append(uniqueValues, v)
+			}
+		}
+		values = uniqueValues
+		numericValues = nil
+		for _, v := range values {
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				numericValues = append(numericValues, f)
+			}
+		}
+	}
+
+	switch agg.Function {
+	case "COUNT":
+		return strconv.Itoa(len(values))
+	case "SUM":
+		if len(numericValues) == 0 {
+			return "0"
+		}
+		var sum float64
+		for _, v := range numericValues {
+			sum += v
+		}
+		return strconv.FormatFloat(sum, 'f', -1, 64)
+	case "MIN":
+		if len(numericValues) == 0 {
+			if len(values) > 0 {
+				return values[0]
+			}
+			return ""
+		}
+		min := numericValues[0]
+		for _, v := range numericValues {
+			if v < min {
+				min = v
+			}
+		}
+		return strconv.FormatFloat(min, 'f', -1, 64)
+	case "MAX":
+		if len(numericValues) == 0 {
+			if len(values) > 0 {
+				return values[len(values)-1]
+			}
+			return ""
+		}
+		max := numericValues[0]
+		for _, v := range numericValues {
+			if v > max {
+				max = v
+			}
+		}
+		return strconv.FormatFloat(max, 'f', -1, 64)
+	case "AVG":
+		if len(numericValues) == 0 {
+			return "0"
+		}
+		sum := 0.0
+		for _, v := range numericValues {
+			sum += v
+		}
+		return strconv.FormatFloat(sum/float64(len(numericValues)), 'f', -1, 64)
+	default:
+		return ""
+	}
 }
