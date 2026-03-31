@@ -122,7 +122,8 @@ func (r *Reader) Parse() ([]types.Triple, error) {
 
 func (r *Reader) Format() Format {
 	if r.format == FormatUnknown {
-		r.detectFormat()
+		format, _ := r.detectFormat()
+		r.format = format
 	}
 	return r.format
 }
