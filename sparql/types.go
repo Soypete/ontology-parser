@@ -34,6 +34,8 @@ type ParsedQuery struct {
 	Distinct   bool
 	Where      []TriplePattern
 	Optional   [][]TriplePattern // each inner slice is an OPTIONAL group
+	Union      [][]TriplePattern // UNION blocks (each inner slice is an alternative)
+	Values     ValuesClause
 	Filters    []Filter
 	Prefixes   map[string]string
 	Limit      int // 0 = no limit
@@ -64,4 +66,42 @@ type Filter struct {
 	Op    FilterOp
 	Left  string // variable or value
 	Right string // value or regex pattern
+}
+
+// GraphPattern represents a graph pattern which can be either basic triples or a UNION group.
+type GraphPattern interface {
+	isGraphPattern()
+}
+
+// BasicPattern represents a basic graph pattern (triple patterns).
+type BasicPattern []TriplePattern
+
+func (BasicPattern) isGraphPattern() {}
+
+// UnionGroup represents a UNION of multiple graph patterns.
+type UnionGroup struct {
+	Patterns []GraphPattern
+}
+
+func (UnionGroup) isGraphPattern() {}
+
+// PropertyPathType represents the type of property path.
+type PropertyPathType int
+
+const (
+	PathZeroOrMore PropertyPathType = iota // *
+	PathOneOrMore                          // +
+	PathZeroOrOne                          // ?
+)
+
+// PropertyPath represents a property path expression in SPARQL.
+type PropertyPath struct {
+	PathType  PropertyPathType
+	Predicate string
+}
+
+// ValuesClause represents a VALUES clause in SPARQL.
+type ValuesClause struct {
+	Variables []string
+	Values    [][]string // each inner slice is a row of values
 }
