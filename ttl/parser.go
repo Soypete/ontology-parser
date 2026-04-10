@@ -452,6 +452,24 @@ func (s *turtleState) parseSubject() (string, []types.Triple, error) {
 
 	ch := s.input[s.pos]
 
+	// RDF 1.2 triple term <<(s p o)>>
+	if s.startsWith("<<(") {
+		term, err := s.parseTripleTerm()
+		if err != nil {
+			return "", nil, err
+		}
+		return term.Value, term.NestedTriples, nil
+	}
+
+	// RDF 1.2 reified triple <<s p o>>
+	if s.pos+1 < len(s.input) && ch == '<' && s.input[s.pos+1] == '<' {
+		term, err := s.parseReifiedTriple()
+		if err != nil {
+			return "", nil, err
+		}
+		return term.Value, term.NestedTriples, nil
+	}
+
 	// Full IRI
 	if ch == '<' {
 		iri, err := s.readIRIRef()
@@ -731,10 +749,10 @@ func (s *turtleState) parseTripleTerm() (RDFTerm, error) {
 		return RDFTerm{}, err
 	}
 	s.skipWS()
-	if s.pos+1 >= len(s.input) || s.input[s.pos] != '>' || s.input[s.pos+1] != ')' {
-		return RDFTerm{}, fmt.Errorf("turtle: expected >>) at pos %d", s.pos)
+	if s.pos+2 >= len(s.input) || s.input[s.pos] != ')' || s.input[s.pos+1] != '>' || s.input[s.pos+2] != '>' {
+		return RDFTerm{}, fmt.Errorf("turtle: expected )>> at pos %d", s.pos)
 	}
-	s.pos += 2
+	s.pos += 3
 
 	return RDFTerm{
 		Value:        fmt.Sprintf("<<(%s %s %s)>>", subject.Value, predicate.Value, object.Value),
@@ -939,6 +957,7 @@ func (s *turtleState) readLiteral() (RDFTerm, error) {
 			term.Datatype = types.RDFDirLangString
 		} else {
 			term.Language = langStr
+			term.Datatype = types.RDFLangString
 		}
 	}
 

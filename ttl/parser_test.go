@@ -626,3 +626,138 @@ sai:hasSpaceVersion
 		t.Errorf("owl:unionOf object should be blank node, got %q", unionOfTriple.Object)
 	}
 }
+
+func TestTurtleParser_DirectionalLanguageTag(t *testing.T) {
+	input := `
+@prefix ex: <http://example.org/> .
+ex:doc ex:title "שלום עולם"@he--rtl .
+ex:doc ex:desc "Hello world"@en--ltr .
+`
+	p := NewTurtleParser()
+	triples, err := p.Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(triples) != 2 {
+		t.Fatalf("expected 2 triples, got %d", len(triples))
+	}
+
+	heTriple := triples[0]
+	if heTriple.Object != "שלום עולם" {
+		t.Errorf("he object = %q, want שלום עולם", heTriple.Object)
+	}
+	if heTriple.Language != "he" {
+		t.Errorf("he language = %q, want he", heTriple.Language)
+	}
+	if heTriple.Direction != "rtl" {
+		t.Errorf("he direction = %q, want rtl", heTriple.Direction)
+	}
+	if heTriple.Datatype != types.RDFDirLangString {
+		t.Errorf("he datatype = %q, want %s", heTriple.Datatype, types.RDFDirLangString)
+	}
+
+	enTriple := triples[1]
+	if enTriple.Object != "Hello world" {
+		t.Errorf("en object = %q, want Hello world", enTriple.Object)
+	}
+	if enTriple.Language != "en" {
+		t.Errorf("en language = %q, want en", enTriple.Language)
+	}
+	if enTriple.Direction != "ltr" {
+		t.Errorf("en direction = %q, want ltr", enTriple.Direction)
+	}
+}
+
+func TestTurtleParser_LanguageTag(t *testing.T) {
+	input := `
+@prefix ex: <http://example.org/> .
+ex:doc ex:title "Hello"@en .
+`
+	p := NewTurtleParser()
+	triples, err := p.Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(triples) != 1 {
+		t.Fatalf("expected 1 triple, got %d", len(triples))
+	}
+	if triples[0].Language != "en" {
+		t.Errorf("language = %q, want en", triples[0].Language)
+	}
+	if triples[0].Datatype != types.RDFLangString {
+		t.Errorf("datatype = %q, want %s", triples[0].Datatype, types.RDFLangString)
+	}
+}
+
+func TestTurtleParser_DatatypeLiteral(t *testing.T) {
+	input := `
+@prefix ex: <http://example.org/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+ex:doc ex:count "42"^^xsd:integer .
+`
+	p := NewTurtleParser()
+	triples, err := p.Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(triples) != 1 {
+		t.Fatalf("expected 1 triple, got %d", len(triples))
+	}
+	if triples[0].Object != "42" {
+		t.Errorf("object = %q, want 42", triples[0].Object)
+	}
+	if triples[0].Datatype != types.XSDInteger {
+		t.Errorf("datatype = %q, want %s", triples[0].Datatype, types.XSDInteger)
+	}
+}
+
+func TestTurtleParser_ReifiedTriple(t *testing.T) {
+	input := `
+@prefix ex: <http://example.org/> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+ex:s1 ex:p1 ex:o1 .
+<<ex:s1 ex:p1 ex:o1>> a rdf:Statement .
+`
+	p := NewTurtleParser()
+	triples, err := p.Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	foundReified := false
+	for _, tr := range triples {
+		if tr.Predicate == types.RDFSubject || tr.Predicate == types.RDFPredicate || tr.Predicate == types.RDFObject {
+			foundReified = true
+			if tr.Subject == "" || !strings.HasPrefix(tr.Subject, "_:") {
+				t.Errorf("reified triple subject should be blank node, got %q", tr.Subject)
+			}
+		}
+	}
+	if !foundReified {
+		t.Error("expected reified triple statements, found none")
+	}
+}
+
+func TestTurtleParser_TripleTerm(t *testing.T) {
+	input := `
+@prefix ex: <http://example.org/> .
+ex:subject ex:hasTriple <<(ex:s ex:p ex:o)>> .
+`
+	p := NewTurtleParser()
+	triples, err := p.Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	foundTripleTerm := false
+	for _, tr := range triples {
+		if tr.IsTripleTerm {
+			foundTripleTerm = true
+			break
+		}
+	}
+	if !foundTripleTerm {
+		t.Error("expected triple term, found none")
+	}
+}

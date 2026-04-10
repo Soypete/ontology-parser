@@ -178,14 +178,19 @@ func (p *XMLParser) parseDescription(decoder *xml.Decoder, el xml.StartElement, 
 			if innerTriples != nil {
 				triples = append(triples, innerTriples...)
 			} else if objectValue != "" {
-				obj := objectValue
-				if datatype != "" {
-					obj = objectValue
-				}
 				if lang != "" {
-					obj = objectValue
+					var dir string
+					if strings.HasSuffix(lang, "--rtl") || strings.HasSuffix(lang, "--ltr") {
+						parts := strings.Split(lang, "--")
+						lang = parts[0]
+						dir = parts[1]
+					}
+					triples = append(triples, p.tripleWithLang(subject, propURI, objectValue, lang, dir))
+				} else if datatype != "" {
+					triples = append(triples, p.tripleWithDatatype(subject, propURI, objectValue, datatype))
+				} else {
+					triples = append(triples, p.triple(subject, propURI, objectValue))
 				}
-				triples = append(triples, p.triple(subject, propURI, obj))
 			}
 
 		case xml.EndElement:
@@ -255,6 +260,37 @@ func (p *XMLParser) triple(s, pred, o string) types.Triple {
 		Subject:   s,
 		Predicate: pred,
 		Object:    o,
+		Graph:     p.Graph,
+	}
+}
+
+func (p *XMLParser) tripleWithLang(s, pred, o, lang, dir string) types.Triple {
+	t := types.Triple{
+		Subject:   s,
+		Predicate: pred,
+		Object:    o,
+		Graph:     p.Graph,
+	}
+	if lang != "" {
+		t.IsLiteral = true
+		if dir != "" {
+			t.Datatype = types.RDFDirLangString
+			t.Direction = dir
+		} else {
+			t.Datatype = types.RDFLangString
+		}
+		t.Language = lang
+	}
+	return t
+}
+
+func (p *XMLParser) tripleWithDatatype(s, pred, o, datatype string) types.Triple {
+	return types.Triple{
+		Subject:   s,
+		Predicate: pred,
+		Object:    o,
+		IsLiteral: true,
+		Datatype:  datatype,
 		Graph:     p.Graph,
 	}
 }
