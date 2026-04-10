@@ -6,8 +6,6 @@
 // Supported features:
 //   - @prefix declarations for prefixed names
 //   - @base for relative IRI resolution
-//   - @version "1.2" directive (RDF 1.2)
-//   - VERSION "1.2" directive (RDF 1.2)
 //   - Full IRIs in angle brackets <...>
 //   - Prefixed names (e.g., rdf:type, schema:Person)
 //   - Predicate lists (;) for sharing subjects
@@ -17,9 +15,6 @@
 //   - String literals (quoted, triple-quoted, multiline)
 //   - Typed literals (^^datatype)
 //   - Language-tagged literals (@en, @de, etc.)
-//   - Directional language-tagged strings (@en--ltr, @he--rtl) (RDF 1.2)
-//   - Triple terms (<<(s p o)>>) (RDF 1.2)
-//   - Reified triples (<<s p o>>, <<s p o ~reifier>>) (RDF 1.2)
 //   - Numeric and boolean literals
 //
 // Example:
@@ -43,19 +38,6 @@ import (
 
 	"github.com/soypete/ontology-go/types"
 )
-
-// RDFTerm represents a parsed RDF term with its associated metadata.
-type RDFTerm struct {
-	Value         string
-	IsLiteral     bool
-	Datatype      string
-	Language      string
-	Direction     string
-	IsBlankNode   bool
-	IsTripleTerm  bool
-	Reifier       string
-	NestedTriples []types.Triple
-}
 
 // TurtleParser parses W3C Turtle serialization into triples.
 // It supports @prefix/@base declarations, prefixed names, full IRIs,
@@ -100,7 +82,17 @@ type turtleState struct {
 	base     string
 	graph    string
 	bnode    int
-	version  string // RDF version ("1.1" or "1.2")
+}
+
+// literalInfo holds metadata for RDF literal values.
+type literalInfo struct {
+	value        string
+	isLiteral    bool
+	datatype     string
+	lang         string
+	Direction    string
+	isTripleTerm bool
+	tripleTerm   string
 }
 
 func (s *turtleState) newBlankNode() string {
@@ -144,18 +136,6 @@ func (p *TurtleParser) parse(input string) ([]types.Triple, error) {
 		}
 		if s.startsWithCI("BASE") && !s.startsWithPName() {
 			if err := s.parseSPARQLBase(); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if s.startsWith("@version") {
-			if err := s.parseVersion(); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		if s.startsWithCI("VERSION") && !s.startsWithPName() {
-			if err := s.parseSPARQLVersion(); err != nil {
 				return nil, err
 			}
 			continue
@@ -311,39 +291,6 @@ func (s *turtleState) parseSPARQLBase() error {
 	return nil
 }
 
-func (s *turtleState) parseVersion() error {
-	// @version "1.2" .
-	s.pos += len("@version")
-	s.skipWS()
-
-	version, err := s.readQuotedString('"')
-	if err != nil {
-		return fmt.Errorf("turtle: expected version string in @version at pos %d: %w", s.pos, err)
-	}
-
-	s.skipWS()
-	if err := s.expect('.'); err != nil {
-		return fmt.Errorf("turtle: expected '.' after @version at pos %d: %w", s.pos, err)
-	}
-
-	s.version = version
-	return nil
-}
-
-func (s *turtleState) parseSPARQLVersion() error {
-	// VERSION "1.2"
-	s.pos += len("VERSION")
-	s.skipWS()
-
-	version, err := s.readQuotedString('"')
-	if err != nil {
-		return fmt.Errorf("turtle: expected version string in VERSION at pos %d: %w", s.pos, err)
-	}
-
-	s.version = version
-	return nil
-}
-
 func (s *turtleState) readPrefixLabel() (string, error) {
 	start := s.pos
 	for s.pos < len(s.input) {
@@ -383,30 +330,6 @@ func (s *turtleState) resolveIRI(iri string) string {
 		return s.base + iri
 	}
 	return iri
-}
-
-func (s *turtleState) readResource() (RDFTerm, error) {
-	s.skipWS()
-	if s.pos >= len(s.input) {
-		return RDFTerm{}, fmt.Errorf("turtle: unexpected end of input at pos %d", s.pos)
-	}
-
-	ch := s.input[s.pos]
-
-	if ch == '<' {
-		iri, err := s.readIRIRef()
-		if err != nil {
-			return RDFTerm{}, err
-		}
-		return RDFTerm{Value: s.resolveIRI(iri)}, nil
-	}
-
-	if s.startsWith("_:") {
-		return RDFTerm{Value: s.readBlankNodeLabel(), IsBlankNode: true}, nil
-	}
-
-	name, _, err := s.readPrefixedNameOrKeyword()
-	return RDFTerm{Value: name}, err
 }
 
 func (s *turtleState) expect(ch byte) error {
@@ -452,22 +375,9 @@ func (s *turtleState) parseSubject() (string, []types.Triple, error) {
 
 	ch := s.input[s.pos]
 
-	// RDF 1.2 triple term <<(s p o)>>
-	if s.startsWith("<<(") {
-		term, err := s.parseTripleTerm()
-		if err != nil {
-			return "", nil, err
-		}
-		return term.Value, term.NestedTriples, nil
-	}
-
-	// RDF 1.2 reified triple <<s p o>>
-	if s.pos+1 < len(s.input) && ch == '<' && s.input[s.pos+1] == '<' {
-		term, err := s.parseReifiedTriple()
-		if err != nil {
-			return "", nil, err
-		}
-		return term.Value, term.NestedTriples, nil
+	// Triple term <<(s p o)>> as subject (RDF 1.2)
+	if ch == '<' && s.pos+1 < len(s.input) && s.input[s.pos:s.pos+2] == "<<" {
+		return s.parseTripleTermSubject()
 	}
 
 	// Full IRI
@@ -526,65 +436,77 @@ func (s *turtleState) parsePredicate() (string, error) {
 	return name, err
 }
 
-func (s *turtleState) parseObject() (RDFTerm, error) {
+func (s *turtleState) parseObject() (string, literalInfo, []types.Triple, error) {
 	s.skipWS()
 	if s.pos >= len(s.input) {
-		return RDFTerm{}, fmt.Errorf("turtle: unexpected end of input at pos %d", s.pos)
+		return "", literalInfo{}, nil, fmt.Errorf("turtle: unexpected end of input at pos %d", s.pos)
 	}
 
 	ch := s.input[s.pos]
 
-	// Check for RDF 1.2 triple term <<(s p o)>>
-	if s.startsWith("<<(") {
+	// Triple term <<(s p o)>> (RDF 1.2) - check before IRI
+	if ch == '<' && s.pos+1 < len(s.input) && s.input[s.pos:s.pos+2] == "<<" {
 		return s.parseTripleTerm()
-	}
-
-	// Check for RDF 1.2 reified triple <<s p o>>
-	if s.pos+1 < len(s.input) && s.input[s.pos] == '<' && s.input[s.pos+1] == '<' {
-		return s.parseReifiedTriple()
 	}
 
 	// Full IRI
 	if ch == '<' {
 		iri, err := s.readIRIRef()
 		if err != nil {
-			return RDFTerm{}, err
+			return "", literalInfo{}, nil, err
 		}
-		return RDFTerm{Value: s.resolveIRI(iri)}, nil
+		return s.resolveIRI(iri), literalInfo{}, nil, nil
 	}
 
 	// Blank node [] syntax
 	if ch == '[' {
-		label, triples, err := s.parseBlankNodePropertyList()
-		return RDFTerm{Value: label, IsBlankNode: true, NestedTriples: triples}, err
+		bnode, triples, err := s.parseBlankNodePropertyList()
+		return bnode, literalInfo{}, triples, err
 	}
 
 	// RDF collection () syntax
 	if ch == '(' {
-		return s.parseCollection()
+		bnode, triples, err := s.parseCollection()
+		return bnode, literalInfo{}, triples, err
 	}
 
 	// Blank node _:label
 	if s.startsWith("_:") {
-		return RDFTerm{Value: s.readBlankNodeLabel(), IsBlankNode: true}, nil
+		return s.readBlankNodeLabel(), literalInfo{}, nil, nil
 	}
 
 	// String literal
 	if ch == '"' || ch == '\'' {
-		return s.readLiteral()
+		lit, triples, err := s.readLiteral()
+		return lit.value, lit, triples, err
 	}
 
 	// Boolean or numeric literals
 	if ch == '+' || ch == '-' || (ch >= '0' && ch <= '9') {
-		return s.readNumericLiteral(), nil
+		value := s.readNumericLiteral()
+		lit := literalInfo{
+			value:     value,
+			isLiteral: true,
+			datatype:  types.XSDDecimal,
+		}
+		if strings.Contains(value, ".") {
+			lit.datatype = types.XSDDouble
+		}
+		return value, lit, nil, nil
 	}
 	if s.startsWith("true") || s.startsWith("false") {
-		return s.readBooleanLiteral(), nil
+		value := s.readBooleanLiteral()
+		lit := literalInfo{
+			value:     value,
+			isLiteral: true,
+			datatype:  types.XSDBoolean,
+		}
+		return value, lit, nil, nil
 	}
 
 	// Prefixed name
-	name, _, err := s.readPrefixedNameOrKeyword()
-	return RDFTerm{Value: name}, err
+	name, triples, err := s.readPrefixedNameOrKeyword()
+	return name, literalInfo{}, triples, err
 }
 
 func (s *turtleState) parsePredicateObjectList(subject string) ([]types.Triple, error) {
@@ -641,74 +563,80 @@ func (s *turtleState) parseObjectList(subject, predicate string) ([]types.Triple
 	for {
 		s.skipWS()
 
-		object, err := s.parseObject()
+		object, lit, objTriples, err := s.parseObject()
 		if err != nil {
 			return nil, err
 		}
-		triples = append(triples, object.NestedTriples...)
-		triple := types.Triple{
+		triples = append(triples, objTriples...)
+		triples = append(triples, types.Triple{
 			Subject:      subject,
 			Predicate:    predicate,
-			Object:       object.Value,
+			Object:       object,
 			Graph:        s.graph,
-			IsLiteral:    object.IsLiteral,
-			Datatype:     object.Datatype,
-			Language:     object.Language,
-			Direction:    object.Direction,
-			IsTripleTerm: object.IsTripleTerm,
-			Reifier:      object.Reifier,
-		}
-		triples = append(triples, triple)
+			IsLiteral:    lit.isLiteral,
+			Datatype:     lit.datatype,
+			Language:     lit.lang,
+			Direction:    lit.Direction,
+			IsTripleTerm: lit.isTripleTerm,
+		})
 
 		s.skipWS()
 		if s.pos >= len(s.input) || s.input[s.pos] != ',' {
 			break
 		}
-		s.pos++ // consume ','
+		s.pos++
 	}
 
 	return triples, nil
 }
 
-func (s *turtleState) parseCollection() (RDFTerm, error) {
-	s.pos++ // consume '('
+func (s *turtleState) parseCollection() (string, []types.Triple, error) {
+	s.pos++
 	s.skipWS()
 
 	var triples []types.Triple
 	var items []string
+	var litInfos []literalInfo
 
 	for {
 		s.skipWS()
 		if s.pos >= len(s.input) {
-			return RDFTerm{}, fmt.Errorf("turtle: unterminated collection at pos %d", s.pos)
+			return "", nil, fmt.Errorf("turtle: unterminated collection at pos %d", s.pos)
 		}
 
 		if s.input[s.pos] == ')' {
-			s.pos++ // consume ')'
+			s.pos++
 			break
 		}
 
-		item, err := s.parseObject()
+		item, lit, itemTriples, err := s.parseObject()
 		if err != nil {
-			return RDFTerm{}, err
+			return "", nil, err
 		}
-		items = append(items, item.Value)
-		triples = append(triples, item.NestedTriples...)
+		items = append(items, item)
+		litInfos = append(litInfos, lit)
+		triples = append(triples, itemTriples...)
 	}
 
 	if len(items) == 0 {
-		return RDFTerm{Value: types.RDFNil, IsBlankNode: true, NestedTriples: triples}, nil
+		return types.RDFNil, nil, nil
 	}
 
 	var head string
 	for i := len(items) - 1; i >= 0; i-- {
 		bnode := s.newBlankNode()
-		triples = append(triples, types.Triple{
+		triple := types.Triple{
 			Subject:   bnode,
 			Predicate: types.RDFFirst,
 			Object:    items[i],
 			Graph:     s.graph,
-		})
+		}
+		if i < len(litInfos) {
+			triple.IsLiteral = litInfos[i].isLiteral
+			triple.Datatype = litInfos[i].datatype
+			triple.Language = litInfos[i].lang
+		}
+		triples = append(triples, triple)
 
 		if i == len(items)-1 {
 			triples = append(triples, types.Triple{
@@ -729,88 +657,7 @@ func (s *turtleState) parseCollection() (RDFTerm, error) {
 		head = bnode
 	}
 
-	return RDFTerm{Value: head, IsBlankNode: true, NestedTriples: triples}, nil
-}
-
-func (s *turtleState) parseTripleTerm() (RDFTerm, error) {
-	s.pos += 3
-	subject, err := s.readResource()
-	if err != nil {
-		return RDFTerm{}, err
-	}
-	s.skipWS()
-	predicate, err := s.readResource()
-	if err != nil {
-		return RDFTerm{}, err
-	}
-	s.skipWS()
-	object, err := s.readResource()
-	if err != nil {
-		return RDFTerm{}, err
-	}
-	s.skipWS()
-	if s.pos+2 >= len(s.input) || s.input[s.pos] != ')' || s.input[s.pos+1] != '>' || s.input[s.pos+2] != '>' {
-		return RDFTerm{}, fmt.Errorf("turtle: expected )>> at pos %d", s.pos)
-	}
-	s.pos += 3
-
-	return RDFTerm{
-		Value:        fmt.Sprintf("<<(%s %s %s)>>", subject.Value, predicate.Value, object.Value),
-		IsTripleTerm: true,
-		NestedTriples: []types.Triple{
-			{Subject: subject.Value, Predicate: predicate.Value, Object: object.Value, Graph: s.graph},
-		},
-	}, nil
-}
-
-func (s *turtleState) parseReifiedTriple() (RDFTerm, error) {
-	s.pos += 2
-	subject, err := s.readResource()
-	if err != nil {
-		return RDFTerm{}, err
-	}
-	s.skipWS()
-	predicate, err := s.readResource()
-	if err != nil {
-		return RDFTerm{}, err
-	}
-	s.skipWS()
-	object, err := s.readResource()
-	if err != nil {
-		return RDFTerm{}, err
-	}
-	s.skipWS()
-	if s.pos+1 >= len(s.input) || s.input[s.pos] != '>' || s.input[s.pos+1] != '>' {
-		return RDFTerm{}, fmt.Errorf("turtle: expected >> at pos %d", s.pos)
-	}
-	s.pos += 2
-
-	bnode := s.newBlankNode()
-	tripleID := fmt.Sprintf("<<%s %s %s>>", subject.Value, predicate.Value, object.Value)
-
-	var reifier string
-	if s.pos < len(s.input) && s.input[s.pos] == '~' {
-		s.pos++
-		reifier = s.readBlankNodeLabel()
-	}
-
-	triples := []types.Triple{
-		{Subject: bnode, Predicate: types.RDFSubject, Object: subject.Value, Graph: s.graph},
-		{Subject: bnode, Predicate: types.RDFPredicate, Object: predicate.Value, Graph: s.graph},
-		{Subject: bnode, Predicate: types.RDFObject, Object: object.Value, Graph: s.graph},
-		{Subject: bnode, Predicate: types.RDFReifies, Object: tripleID, Graph: s.graph},
-	}
-
-	if reifier != "" {
-		triples = append(triples, types.Triple{Subject: reifier, Predicate: types.RDFReifies, Object: tripleID, Graph: s.graph})
-	}
-
-	return RDFTerm{
-		Value:         bnode,
-		IsTripleTerm:  true,
-		Reifier:       reifier,
-		NestedTriples: triples,
-	}, nil
+	return head, triples, nil
 }
 
 func (s *turtleState) parseBlankNodePropertyList() (string, []types.Triple, error) {
@@ -904,7 +751,7 @@ func (s *turtleState) readPrefixedNameOrKeyword() (string, []types.Triple, error
 	return "", nil, fmt.Errorf("turtle: unexpected token '%s' at pos %d", word, start)
 }
 
-func (s *turtleState) readLiteral() (RDFTerm, error) {
+func (s *turtleState) readLiteral() (literalInfo, []types.Triple, error) {
 	quote := s.input[s.pos]
 	var value string
 	var err error
@@ -915,26 +762,31 @@ func (s *turtleState) readLiteral() (RDFTerm, error) {
 		value, err = s.readQuotedString(quote)
 	}
 	if err != nil {
-		return RDFTerm{}, err
+		return literalInfo{}, nil, err
 	}
 
-	term := RDFTerm{Value: value, IsLiteral: true, Datatype: types.XSDString}
+	lit := literalInfo{
+		value:     value,
+		isLiteral: true,
+		datatype:  types.XSDString,
+	}
 
 	if s.pos < len(s.input) && s.input[s.pos] == '^' && s.pos+1 < len(s.input) && s.input[s.pos+1] == '^' {
 		s.pos += 2
 		if s.pos < len(s.input) && s.input[s.pos] == '<' {
-			dt, err := s.readIRIRef()
+			datatype, err := s.readIRIRef()
 			if err != nil {
-				return RDFTerm{}, err
+				return literalInfo{}, nil, err
 			}
-			term.Datatype = s.resolveIRI(dt)
+			lit.datatype = s.resolveIRI(datatype)
 		} else {
-			dt, _, err := s.readPrefixedNameOrKeyword()
+			datatype, _, err := s.readPrefixedNameOrKeyword()
 			if err != nil {
-				return RDFTerm{}, err
+				return literalInfo{}, nil, err
 			}
-			term.Datatype = dt
+			lit.datatype = datatype
 		}
+		return lit, nil, nil
 	}
 
 	if s.pos < len(s.input) && s.input[s.pos] == '@' {
@@ -949,19 +801,21 @@ func (s *turtleState) readLiteral() (RDFTerm, error) {
 				break
 			}
 		}
-		langStr := lang.String()
-		if strings.HasSuffix(langStr, "--ltr") || strings.HasSuffix(langStr, "--rtl") {
-			parts := strings.Split(langStr, "--")
-			term.Language = parts[0]
-			term.Direction = parts[1]
-			term.Datatype = types.RDFDirLangString
+		tag := lang.String()
+
+		if strings.HasSuffix(tag, "--rtl") || strings.HasSuffix(tag, "--ltr") {
+			parts := strings.SplitN(tag, "--", 2)
+			lit.lang = parts[0]
+			lit.Direction = parts[1]
+			lit.datatype = types.RDFDirLangString
 		} else {
-			term.Language = langStr
-			term.Datatype = types.RDFLangString
+			lit.lang = tag
+			lit.datatype = types.RDFLangString
 		}
+		return lit, nil, nil
 	}
 
-	return term, nil
+	return lit, nil, nil
 }
 
 func (s *turtleState) readQuotedString(quote byte) (string, error) {
@@ -1047,7 +901,7 @@ func (s *turtleState) readTripleQuotedString(quote byte) (string, error) {
 	return "", fmt.Errorf("turtle: unterminated triple-quoted string at pos %d", s.pos)
 }
 
-func (s *turtleState) readNumericLiteral() RDFTerm {
+func (s *turtleState) readNumericLiteral() string {
 	start := s.pos
 	if s.pos < len(s.input) && (s.input[s.pos] == '+' || s.input[s.pos] == '-') {
 		s.pos++
@@ -1071,45 +925,152 @@ func (s *turtleState) readNumericLiteral() RDFTerm {
 			s.pos++
 		}
 	}
-
-	lexical := s.input[start:s.pos]
-	// Determine datatype based on format
-	var datatype string
-	if strings.ContainsAny(lexical, ".eE") {
-		if strings.Contains(lexical, "e") || strings.Contains(lexical, "E") {
-			datatype = types.XSDDouble
-		} else {
-			datatype = types.XSDDecimal
-		}
-	} else {
-		datatype = types.XSDInteger
-	}
-
-	return RDFTerm{
-		Value:     lexical,
-		IsLiteral: true,
-		Datatype:  datatype,
-	}
+	return s.input[start:s.pos]
 }
 
-func (s *turtleState) readBooleanLiteral() RDFTerm {
+func (s *turtleState) readBooleanLiteral() string {
 	if s.startsWith("true") {
 		s.pos += 4
-		return RDFTerm{
-			Value:     "true",
-			IsLiteral: true,
-			Datatype:  types.XSDBoolean,
-		}
+		return "true"
 	}
 	s.pos += 5
-	return RDFTerm{
-		Value:     "false",
-		IsLiteral: true,
-		Datatype:  types.XSDBoolean,
-	}
+	return "false"
 }
 
 // isNameChar returns true if r is a valid character in a Turtle local name or prefix.
 func isNameChar(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '%'
+}
+
+func (s *turtleState) parseTripleTerm() (string, literalInfo, []types.Triple, error) {
+	s.pos += 2 // consume '<<'
+	s.skipWS()
+
+	var subj, pred, obj string
+	var subjTriples, objTriples []types.Triple
+	var err error
+
+	if s.pos < len(s.input) && s.input[s.pos] == '(' {
+		s.pos++
+		s.skipWS()
+		subj, subjTriples, err = s.parseSubject()
+		if err != nil {
+			return "", literalInfo{}, nil, err
+		}
+		s.skipWS()
+		pred, err = s.parsePredicate()
+		if err != nil {
+			return "", literalInfo{}, nil, err
+		}
+		s.skipWS()
+		obj, _, objTriples, err = s.parseObject()
+		if err != nil {
+			return "", literalInfo{}, nil, err
+		}
+		s.skipWS()
+		if s.pos >= len(s.input) || s.input[s.pos] != ')' {
+			return "", literalInfo{}, nil, fmt.Errorf("turtle: expected ')' at pos %d", s.pos)
+		}
+		s.pos++
+	} else {
+		subj, subjTriples, err = s.parseSubject()
+		if err != nil {
+			return "", literalInfo{}, nil, err
+		}
+		s.skipWS()
+		pred, err = s.parsePredicate()
+		if err != nil {
+			return "", literalInfo{}, nil, err
+		}
+		s.skipWS()
+		obj, _, objTriples, err = s.parseObject()
+		if err != nil {
+			return "", literalInfo{}, nil, err
+		}
+	}
+
+	s.skipWS()
+	if s.pos+1 >= len(s.input) || s.input[s.pos:s.pos+2] != ">>" {
+		return "", literalInfo{}, nil, fmt.Errorf("turtle: expected '>>' at pos %d", s.pos)
+	}
+	s.pos += 2 // consume '>>'
+
+	bnode := s.newBlankNode()
+	triples := append(subjTriples, objTriples...)
+	triples = append(triples,
+		types.Triple{Subject: bnode, Predicate: types.RDFSubject, Object: subj, Graph: s.graph},
+		types.Triple{Subject: bnode, Predicate: types.RDFPredicate, Object: pred, Graph: s.graph},
+		types.Triple{Subject: bnode, Predicate: types.RDFObject, Object: obj, Graph: s.graph},
+	)
+
+	return bnode, literalInfo{
+		value:        bnode,
+		isLiteral:    false,
+		isTripleTerm: true,
+		tripleTerm:   subj + " " + pred + " " + obj,
+	}, triples, nil
+}
+
+func (s *turtleState) parseTripleTermSubject() (string, []types.Triple, error) {
+	s.pos += 2 // consume '<<'
+	s.skipWS()
+
+	var subj, pred, obj string
+	var subjTriples, objTriples []types.Triple
+	var err error
+
+	if s.pos < len(s.input) && s.input[s.pos] == '(' {
+		s.pos++
+		s.skipWS()
+		subj, subjTriples, err = s.parseSubject()
+		if err != nil {
+			return "", nil, err
+		}
+		s.skipWS()
+		pred, err = s.parsePredicate()
+		if err != nil {
+			return "", nil, err
+		}
+		s.skipWS()
+		obj, _, objTriples, err = s.parseObject()
+		if err != nil {
+			return "", nil, err
+		}
+		s.skipWS()
+		if s.pos >= len(s.input) || s.input[s.pos] != ')' {
+			return "", nil, fmt.Errorf("turtle: expected ')' at pos %d", s.pos)
+		}
+		s.pos++
+	} else {
+		subj, subjTriples, err = s.parseSubject()
+		if err != nil {
+			return "", nil, err
+		}
+		s.skipWS()
+		pred, err = s.parsePredicate()
+		if err != nil {
+			return "", nil, err
+		}
+		s.skipWS()
+		obj, _, objTriples, err = s.parseObject()
+		if err != nil {
+			return "", nil, err
+		}
+	}
+
+	s.skipWS()
+	if s.pos+1 >= len(s.input) || s.input[s.pos:s.pos+2] != ">>" {
+		return "", nil, fmt.Errorf("turtle: expected '>>' at pos %d", s.pos)
+	}
+	s.pos += 2 // consume '>>'
+
+	bnode := s.newBlankNode()
+	triples := append(subjTriples, objTriples...)
+	triples = append(triples,
+		types.Triple{Subject: bnode, Predicate: types.RDFSubject, Object: subj, Graph: s.graph},
+		types.Triple{Subject: bnode, Predicate: types.RDFPredicate, Object: pred, Graph: s.graph},
+		types.Triple{Subject: bnode, Predicate: types.RDFObject, Object: obj, Graph: s.graph},
+	)
+
+	return bnode, triples, nil
 }
