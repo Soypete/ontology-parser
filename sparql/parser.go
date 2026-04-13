@@ -180,8 +180,92 @@ func extractBraceBlock(s string, keyword string) (body string, remaining string,
 }
 
 func parseWhereBody(body string, q *ParsedQuery) error {
-	// Extract OPTIONAL blocks
+	// Extract UNION blocks first (they have lowest precedence)
 	remaining := body
+	for {
+		upper := strings.ToUpper(remaining)
+		unionIdx := strings.Index(upper, "UNION")
+		if unionIdx == -1 {
+			break
+		}
+
+		// Find the { ... } block before UNION
+		beforeUnion := remaining[:unionIdx]
+		braceStart := strings.LastIndex(beforeUnion, "{")
+		if braceStart == -1 {
+			return fmt.Errorf("expected '{' before UNION")
+		}
+		braceEnd := strings.LastIndex(beforeUnion, "}")
+
+		var leftPatterns []TriplePattern
+		if braceEnd == -1 || braceEnd < braceStart {
+			// No closing brace yet, this is the first pattern block
+			inner := remaining[braceStart+1:]
+			patterns, err := parseTriplePatterns(inner, q.Prefixes)
+			if err != nil {
+				return fmt.Errorf("in UNION left side: %w", err)
+			}
+			leftPatterns = patterns
+			remaining = remaining[unionIdx:]
+		} else {
+			// Has closing brace
+			inner := beforeUnion[braceStart+1 : braceEnd]
+			patterns, err := parseTriplePatterns(inner, q.Prefixes)
+			if err != nil {
+				return fmt.Errorf("in UNION left side: %w", err)
+			}
+			leftPatterns = patterns
+			remaining = remaining[braceEnd+1:]
+		}
+
+		// Find the { ... } block after UNION
+		upper = strings.ToUpper(remaining)
+		unionIdx = strings.Index(upper, "UNION")
+		if unionIdx == -1 {
+			return fmt.Errorf("expected another UNION or pattern after UNION")
+		}
+
+		afterUnion := remaining[unionIdx+4:]
+		braceStart = strings.Index(afterUnion, "{")
+		if braceStart == -1 {
+			return fmt.Errorf("expected '{' after UNION")
+		}
+
+		// Find matching closing brace
+		depth := 0
+		closeIdx := -1
+		for i, c := range afterUnion[braceStart:] {
+			if c == '{' {
+				depth++
+			} else if c == '}' {
+				depth--
+				if depth == 0 {
+					closeIdx = braceStart + i
+					break
+				}
+			}
+		}
+
+		if closeIdx == -1 {
+			return fmt.Errorf("unmatched '{' in UNION right side")
+		}
+
+		inner := afterUnion[braceStart+1 : closeIdx]
+		rightPatterns, err := parseTriplePatterns(inner, q.Prefixes)
+		if err != nil {
+			return fmt.Errorf("in UNION right side: %w", err)
+		}
+
+		// Add both patterns as a union group
+		q.Union = append(q.Union, leftPatterns, rightPatterns)
+
+		remaining = afterUnion[closeIdx+1:]
+	}
+
+	// Extract VALUES blocks
+	remaining = parseValues(remaining, q)
+
+	// Extract OPTIONAL blocks
 	for {
 		upper := strings.ToUpper(remaining)
 		optIdx := strings.Index(upper, "OPTIONAL")
@@ -272,6 +356,92 @@ func parseFilters(s string, q *ParsedQuery) string {
 		// Remove FILTER(...) from remaining: everything from filterIdx to filterIdx+6+closeIdx+1
 		endPos := filterIdx + 6 + closeIdx + 1
 		remaining = remaining[:filterIdx] + remaining[endPos:]
+	}
+
+	return remaining
+}
+
+func parseValues(s string, q *ParsedQuery) string {
+	remaining := s
+	for {
+		upper := strings.ToUpper(remaining)
+		valuesIdx := strings.Index(upper, "VALUES")
+		if valuesIdx == -1 {
+			break
+		}
+
+		raw := remaining[valuesIdx+6:]
+		raw = strings.TrimSpace(raw)
+
+		// Extract variables: (?var1 ?var2) or ?var
+		varRe := regexp.MustCompile(`^\(([^)]+)\)`)
+		m := varRe.FindStringSubmatch(raw)
+		if m != nil {
+			varsStr := m[1]
+			varRe2 := regexp.MustCompile(`[\?\$](\w+)`)
+			for _, vm := range varRe2.FindAllStringSubmatch(varsStr, -1) {
+				q.Values.Variables = append(q.Values.Variables, vm[1])
+			}
+			raw = raw[len(m[0]):]
+		} else {
+			// Single variable
+			varRe2 := regexp.MustCompile(`^[\?\$](\w+)`)
+			if vm := varRe2.FindStringSubmatch(raw); vm != nil {
+				q.Values.Variables = append(q.Values.Variables, vm[1])
+				raw = raw[len(vm[0]):]
+			} else {
+				break
+			}
+		}
+
+		raw = strings.TrimSpace(raw)
+		if !strings.HasPrefix(raw, "{") {
+			break
+		}
+
+		// Find the closing brace
+		depth := 0
+		closeIdx := -1
+		for i, c := range raw {
+			if c == '{' {
+				depth++
+			} else if c == '}' {
+				depth--
+				if depth == 0 {
+					closeIdx = i
+					break
+				}
+			}
+		}
+
+		if closeIdx == -1 {
+			break
+		}
+
+		valuesBody := raw[1:closeIdx]
+
+		// Parse each value row
+		for _, row := range strings.Split(valuesBody, ".") {
+			row = strings.TrimSpace(row)
+			if row == "" {
+				continue
+			}
+			var values []string
+			tokens := strings.Fields(row)
+			for _, t := range tokens {
+				values = append(values, expandTerm(t, q.Prefixes))
+			}
+			if len(values) > 0 {
+				q.Values.Values = append(q.Values.Values, values)
+			}
+		}
+
+		endPos := valuesIdx + 6 + closeIdx + 1
+		if endPos < len(remaining) {
+			remaining = remaining[:valuesIdx] + remaining[endPos:]
+		} else {
+			remaining = remaining[:valuesIdx]
+		}
 	}
 
 	return remaining

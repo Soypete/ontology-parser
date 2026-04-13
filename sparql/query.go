@@ -72,6 +72,20 @@ func (e *Engine) ExecuteParsed(q *ParsedQuery) (*types.QueryResult, error) {
 	// Match the basic graph pattern
 	bindings, matchedTriples, path := matchBGP(q.Where, allTriples)
 
+	// Apply VALUES clause (filter bindings to only include specified values)
+	if len(q.Values.Values) > 0 {
+		bindings = applyValues(bindings, q.Values)
+	}
+
+	// Apply UNION patterns
+	if len(q.Union) > 0 {
+		unionBindings, unionTriples, unionPath := matchUnion(q.Union, allTriples)
+		// Merge UNION results with regular bindings
+		bindings = append(bindings, unionBindings...)
+		matchedTriples = append(matchedTriples, unionTriples...)
+		path = append(path, unionPath...)
+	}
+
 	// Apply OPTIONAL patterns
 	for _, optPatterns := range q.Optional {
 		bindings = applyOptional(bindings, optPatterns, allTriples)
@@ -467,4 +481,70 @@ func computeAggregate(group []map[string]string, agg AggregateExpression) string
 	default:
 		return ""
 	}
+}
+
+func applyValues(bindings []map[string]string, values ValuesClause) []map[string]string {
+	if len(values.Values) == 0 || len(values.Variables) == 0 {
+		return bindings
+	}
+
+	var result []map[string]string
+	for _, binding := range bindings {
+		for _, valueRow := range values.Values {
+			match := true
+			for varIdx, varName := range values.Variables {
+				if varIdx >= len(valueRow) {
+					continue
+				}
+				if existingVal, ok := binding[varName]; ok {
+					if existingVal != valueRow[varIdx] {
+						match = false
+						break
+					}
+				} else {
+					// Variable not bound, we can bind it
+					newBinding := copyBinding(binding)
+					newBinding[varName] = valueRow[varIdx]
+					result = append(result, newBinding)
+					match = false // don't add original
+				}
+			}
+			if match && len(values.Variables) == len(valueRow) {
+				allBound := true
+				for _, varName := range values.Variables {
+					if _, ok := binding[varName]; !ok {
+						allBound = false
+						break
+					}
+				}
+				if allBound {
+					result = append(result, binding)
+				}
+			}
+		}
+	}
+	return result
+}
+
+func matchUnion(unionPatterns [][]TriplePattern, triples []types.Triple) ([]map[string]string, []types.Triple, []string) {
+	var allBindings []map[string]string
+	var allTriples []types.Triple
+	var path []string
+
+	seenTriples := make(map[string]bool)
+
+	for _, patterns := range unionPatterns {
+		bindings, matched, p := matchBGP(patterns, triples)
+		allBindings = append(allBindings, bindings...)
+		for _, t := range matched {
+			key := t.Subject + "|" + t.Predicate + "|" + t.Object
+			if !seenTriples[key] {
+				seenTriples[key] = true
+				allTriples = append(allTriples, t)
+			}
+		}
+		path = append(path, p...)
+	}
+
+	return allBindings, allTriples, path
 }
