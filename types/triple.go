@@ -56,6 +56,43 @@ const (
 	XSDDateTime = XSD + "dateTime"
 )
 
+const (
+	RDFSNamespace     = "http://www.w3.org/2000/01/rdf-schema#"
+	RDFSSubClassOf    = RDFSNamespace + "subClassOf"
+	RDFSSubPropertyOf = RDFSNamespace + "subPropertyOf"
+	RDFSLabel         = RDFSNamespace + "label"
+	RDFSComment       = RDFSNamespace + "comment"
+	RDFSdomain        = RDFSNamespace + "domain"
+	RDFSRange         = RDFSNamespace + "range"
+	RDFSClass         = RDFSNamespace + "Class"
+	RDFSResource      = RDFSNamespace + "Resource"
+	RDFSLiteral       = RDFSNamespace + "Literal"
+)
+
+const (
+	OWLNS                        = "http://www.w3.org/2002/07/owl#"
+	OWLClass                     = OWLNS + "Class"
+	OWLEquivalentClass           = OWLNS + "equivalentClass"
+	OWLEquivalentProperty        = OWLNS + "equivalentProperty"
+	OWLInverseOf                 = OWLNS + "inverseOf"
+	OWLTransitiveProperty        = OWLNS + "TransitiveProperty"
+	OWLSymmetricProperty         = OWLNS + "SymmetricProperty"
+	OWLFunctionalProperty        = OWLNS + "FunctionalProperty"
+	OWLInverseFunctionalProperty = OWLNS + "InverseFunctionalProperty"
+	OWLObjectProperty            = OWLNS + "ObjectProperty"
+	OWLDatatypeProperty          = OWLNS + "DatatypeProperty"
+	OWLAnnotationProperty        = OWLNS + "AnnotationProperty"
+	OWLThing                     = OWLNS + "Thing"
+	OWLNothing                   = OWLNS + "Nothing"
+	OWLOnProperty                = OWLNS + "onProperty"
+	OWLAllValuesFrom             = OWLNS + "allValuesFrom"
+	OWLSomeValuesFrom            = OWLNS + "someValuesFrom"
+	OWLHasValue                  = OWLNS + "hasValue"
+	OWLMinCardinality            = OWLNS + "minCardinality"
+	OWLMaxCardinality            = OWLNS + "maxCardinality"
+	OWLCardinality               = OWLNS + "cardinality"
+)
+
 // Triple represents an RDF triple with an optional named graph.
 // All fields support RDF 1.2 features including directional language tags
 // and triple terms for reification.
