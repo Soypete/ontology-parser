@@ -95,7 +95,7 @@ const (
 
 // Triple represents an RDF triple with an optional named graph.
 // All fields support RDF 1.2 features including directional language tags
-// and triple terms for reification.
+// and triple terms for reification. It supports both resource objects and literal values.
 type Triple struct {
 	Subject   string `json:"subject"`
 	Predicate string `json:"predicate"`

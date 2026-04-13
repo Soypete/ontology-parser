@@ -635,6 +635,7 @@ func (s *turtleState) parseCollection() (string, []types.Triple, error) {
 			triple.IsLiteral = litInfos[i].isLiteral
 			triple.Datatype = litInfos[i].datatype
 			triple.Language = litInfos[i].lang
+			triple.Direction = litInfos[i].Direction
 		}
 		triples = append(triples, triple)
 
