@@ -93,17 +93,6 @@ const (
 	OWLCardinality               = OWLNS + "cardinality"
 )
 
-const (
-	XSDNamespace = "http://www.w3.org/2001/XMLSchema#"
-	XSDString    = XSDNamespace + "string"
-	XSDBoolean   = XSDNamespace + "boolean"
-	XSDDecimal   = XSDNamespace + "decimal"
-	XSDDouble    = XSDNamespace + "double"
-	XSDInteger   = XSDNamespace + "integer"
-	XSDDate      = XSDNamespace + "date"
-	XSDDateTime  = XSDNamespace + "dateTime"
-)
-
 // Triple represents an RDF triple with an optional named graph.
 // All fields support RDF 1.2 features including directional language tags
 // and triple terms for reification. It supports both resource objects and literal values.
