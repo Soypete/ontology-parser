@@ -229,6 +229,128 @@ func TestEngine_FilterRegex(t *testing.T) {
 	}
 }
 
+func TestEngine_FilterContains(t *testing.T) {
+	s := store.NewMemoryStore()
+	_ = s.Register("test", []types.Triple{
+		{Subject: "alice", Predicate: "name", Object: "Alice Smith"},
+		{Subject: "bob", Predicate: "name", Object: "Robert Jones"},
+		{Subject: "charlie", Predicate: "name", Object: "Alice Johnson"},
+	})
+
+	engine := NewEngine(s)
+	result, err := engine.Execute(`
+		SELECT ?person ?name WHERE {
+			?person name ?name .
+			FILTER (contains(?name, "Alice"))
+		}
+	`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result.Bindings) != 2 {
+		t.Fatalf("expected 2 bindings, got %d", len(result.Bindings))
+	}
+}
+
+func TestEngine_FilterStartsWith(t *testing.T) {
+	s := store.NewMemoryStore()
+	_ = s.Register("test", []types.Triple{
+		{Subject: "alice", Predicate: "name", Object: "Alice Smith"},
+		{Subject: "bob", Predicate: "name", Object: "Robert Jones"},
+		{Subject: "charlie", Predicate: "name", Object: "Alice Johnson"},
+	})
+
+	engine := NewEngine(s)
+	result, err := engine.Execute(`
+		SELECT ?person ?name WHERE {
+			?person name ?name .
+			FILTER (startsWith(?name, "Alice"))
+		}
+	`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result.Bindings) != 2 {
+		t.Fatalf("expected 2 bindings, got %d", len(result.Bindings))
+	}
+}
+
+func TestEngine_FilterEndsWith(t *testing.T) {
+	s := store.NewMemoryStore()
+	_ = s.Register("test", []types.Triple{
+		{Subject: "alice", Predicate: "name", Object: "Alice Smith"},
+		{Subject: "bob", Predicate: "name", Object: "Bob Jones"},
+		{Subject: "charlie", Predicate: "name", Object: "Charlie Brown"},
+	})
+
+	engine := NewEngine(s)
+	result, err := engine.Execute(`
+		SELECT ?person ?name WHERE {
+			?person name ?name .
+			FILTER (endsWith(?name, "Jones"))
+		}
+	`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result.Bindings) != 1 {
+		t.Fatalf("expected 1 binding, got %d", len(result.Bindings))
+	}
+}
+
+func TestEngine_FilterIsURI(t *testing.T) {
+	s := store.NewMemoryStore()
+	_ = s.Register("test", []types.Triple{
+		{Subject: "http://example.org/alice", Predicate: "http://xmlns.com/foaf/0.1/name", Object: "Alice"},
+		{Subject: "bob", Predicate: "name", Object: "Bob"},
+	})
+
+	engine := NewEngine(s)
+	result, err := engine.Execute(`
+		SELECT ?s WHERE {
+			?s ?p ?o .
+			FILTER (isURI(?s))
+		}
+	`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result.Bindings) != 1 {
+		t.Fatalf("expected 1 binding, got %d", len(result.Bindings))
+	}
+
+	if result.Bindings[0]["s"] != "http://example.org/alice" {
+		t.Errorf("expected http://example.org/alice, got %s", result.Bindings[0]["s"])
+	}
+}
+
+func TestEngine_FilterIsLiteral(t *testing.T) {
+	s := store.NewMemoryStore()
+	_ = s.Register("test", []types.Triple{
+		{Subject: "http://example.org/alice", Predicate: "http://xmlns.com/foaf/0.1/name", Object: "Alice"},
+		{Subject: "bob", Predicate: "name", Object: "Bob"},
+	})
+
+	engine := NewEngine(s)
+	result, err := engine.Execute(`
+		SELECT ?o WHERE {
+			?s ?p ?o .
+			FILTER (isLiteral(?o))
+		}
+	`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result.Bindings) != 2 {
+		t.Fatalf("expected 2 bindings, got %d", len(result.Bindings))
+	}
+}
+
 func TestEngine_Limit(t *testing.T) {
 	s := store.NewMemoryStore()
 	_ = s.Register("test", []types.Triple{

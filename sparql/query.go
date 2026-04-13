@@ -64,10 +64,14 @@ func (e *Engine) ExecuteParsed(q *ParsedQuery) (*types.QueryResult, error) {
 		return nil, fmt.Errorf("only SELECT queries are supported")
 	}
 
+	// Get all triples first - SKOS inference needs all triples to generate correct inferences
 	allTriples := e.store.All()
 
-	// Apply SKOS inference if enabled
+	// Apply SKOS inference if enabled (must run on ALL triples, not filtered)
 	allTriples = e.inferSKOSTriples(allTriples)
+
+	// Now optimize by pre-filtering the inferred triples
+	allTriples = e.getOptimizedTriplesWithOptional(q.Where, q.Optional, allTriples)
 
 	// Match the basic graph pattern
 	bindings, matchedTriples, path := matchBGP(q.Where, allTriples)
@@ -140,6 +144,86 @@ func (e *Engine) ExecuteParsed(q *ParsedQuery) (*types.QueryResult, error) {
 		Triples:  matchedTriples,
 		Path:     path,
 	}, nil
+}
+
+// getOptimizedTriplesWithOptional filters triples based on fixed values in patterns.
+// Takes a pre-filtered set of triples (after SKOS inference) and further filters by patterns.
+func (e *Engine) getOptimizedTriplesWithOptional(patterns []TriplePattern, optionals [][]TriplePattern, triples []types.Triple) []types.Triple {
+	// Collect all patterns including OPTIONALs
+	allPatterns := make([]TriplePattern, len(patterns))
+	copy(allPatterns, patterns)
+	for _, optGroup := range optionals {
+		allPatterns = append(allPatterns, optGroup...)
+	}
+
+	if len(allPatterns) == 0 {
+		return triples
+	}
+
+	// For multi-pattern queries, only optimize if ALL patterns share the same fixed predicate
+	// (otherwise it's a join across different predicates and we need all triples)
+	if len(allPatterns) > 1 {
+		var commonPredicate string
+		for _, p := range allPatterns {
+			if isVariable(p.Predicate) {
+				return triples // Variable predicate - can't optimize
+			}
+			if commonPredicate == "" {
+				commonPredicate = p.Predicate
+			} else if commonPredicate != p.Predicate {
+				return triples // Different predicates - can't optimize
+			}
+		}
+		// All patterns share the same fixed predicate - filter by predicate
+		if commonPredicate != "" {
+			return filterTriplesByPredicate(triples, commonPredicate)
+		}
+	}
+
+	// Single pattern query - convert variables to empty string for filtering
+	p := allPatterns[0]
+	subject := ""
+	predicate := ""
+	object := ""
+
+	if !isVariable(p.Subject) {
+		subject = p.Subject
+	}
+	if !isVariable(p.Predicate) {
+		predicate = p.Predicate
+	}
+	if !isVariable(p.Object) {
+		object = p.Object
+	}
+
+	// Only optimize if we have at least one fixed value
+	if subject != "" || predicate != "" || object != "" {
+		return filterTriples(triples, subject, predicate, object)
+	}
+
+	return triples
+}
+
+func filterTriples(triples []types.Triple, subject, predicate, object string) []types.Triple {
+	var result []types.Triple
+	for _, t := range triples {
+		if (subject == "" || t.Subject == subject) &&
+			(predicate == "" || t.Predicate == predicate) &&
+			(object == "" || t.Object == object) {
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
+func filterTriplesByPredicate(triples []types.Triple, predicate string) []types.Triple {
+	var result []types.Triple
+	for _, t := range triples {
+		if t.Predicate == predicate {
+			result = append(result, t)
+		}
+	}
+	return result
 }
 
 // matchBGP evaluates a basic graph pattern against triples.
@@ -227,7 +311,7 @@ func tryMatch(pattern TriplePattern, triple types.Triple, binding map[string]str
 	if !matchTerm(pattern.Subject, triple.Subject, nb) {
 		return nil
 	}
-	if !matchTerm(pattern.Predicate, triple.Predicate, nb) {
+	if !matchPredicate(pattern.Predicate, triple.Predicate, nb) {
 		return nil
 	}
 	if !matchTerm(pattern.Object, triple.Object, nb) {
@@ -235,6 +319,57 @@ func tryMatch(pattern TriplePattern, triple types.Triple, binding map[string]str
 	}
 
 	return nb
+}
+
+// matchPredicate matches a pattern predicate against a triple predicate.
+// Handles fx:anySlot magic property that matches any rdf:_N container membership property.
+func matchPredicate(patternPred, triplePred string, binding map[string]string) bool {
+	// Check for fx:anySlot magic property
+	if isMagicProperty(patternPred, "anySlot") {
+		// Match any rdf:_N property
+		return isContainerMembershipProperty(triplePred)
+	}
+
+	// fx:cardinal(?a) - returns true if ?a is a container membership property
+	if isMagicFunction(patternPred, "cardinal") {
+		// In filter context, check if the bound value is a container membership property
+		if varName := extractVariableFromMagicFunc(patternPred); varName != "" {
+			if boundVal, ok := binding[varName]; ok {
+				return isContainerMembershipProperty(boundVal)
+			}
+		}
+		return false
+	}
+
+	// Standard term matching
+	return matchTerm(patternPred, triplePred, binding)
+}
+
+// isMagicProperty checks if a term is a magic property like fx:anySlot.
+func isMagicProperty(term, propName string) bool {
+	return strings.HasPrefix(term, "http://sparql.xyz/facade-x/ns/") &&
+		strings.HasSuffix(term, propName)
+}
+
+// isMagicFunction checks if a term is a magic function like fx:cardinal.
+func isMagicFunction(term, funcName string) bool {
+	return strings.HasPrefix(term, "http://sparql.xyz/facade-x/ns/") &&
+		strings.HasSuffix(term, funcName)
+}
+
+// extractVariableFromMagicFunc extracts the variable name from a magic function term.
+func extractVariableFromMagicFunc(term string) string {
+	re := regexp.MustCompile(`([\?\$]\w+)`)
+	m := re.FindStringSubmatch(term)
+	if m != nil {
+		return m[1][1:] // Remove ? or $
+	}
+	return ""
+}
+
+// isContainerMembershipProperty returns true if the predicate is rdf:_N (container membership).
+func isContainerMembershipProperty(pred string) bool {
+	return strings.HasPrefix(pred, "http://www.w3.org/1999/02/22-rdf-syntax-ns#_")
 }
 
 // matchTerm matches a pattern term against a concrete value, updating bindings.
@@ -262,20 +397,96 @@ func applyFilter(bindings []map[string]string, f Filter) []map[string]string {
 }
 
 func evaluateFilter(f Filter, binding map[string]string) bool {
-	left := resolveValue(f.Left, binding)
-	right := f.Right
-
 	switch f.Op {
 	case FilterEquals:
+		left := resolveValue(f.Left, binding)
+		right := f.Right
 		return left == right
 	case FilterNotEquals:
+		left := resolveValue(f.Left, binding)
+		right := f.Right
 		return left != right
 	case FilterRegex:
-		matched, _ := regexp.MatchString(right, left)
+		left := resolveValue(f.Left, binding)
+		matched, _ := regexp.MatchString(f.Right, left)
 		return matched
+	case FilterFunction:
+		return evaluateFilterFunction(f, binding)
 	default:
 		return true
 	}
+}
+
+func evaluateFilterFunction(f Filter, binding map[string]string) bool {
+	if len(f.Args) == 0 {
+		return true
+	}
+
+	// Resolve first argument (usually a variable)
+	arg0 := resolveValue(f.Args[0], binding)
+
+	switch f.Func {
+	case FuncContains:
+		if len(f.Args) >= 2 {
+			return strings.Contains(arg0, f.Args[1])
+		}
+	case FuncStrStarts, FuncStartsWith:
+		if len(f.Args) >= 2 {
+			return strings.HasPrefix(arg0, f.Args[1])
+		}
+	case FuncStrEnds, FuncEndsWith:
+		if len(f.Args) >= 2 {
+			return strings.HasSuffix(arg0, f.Args[1])
+		}
+	case FuncLcase:
+		// Lcase in filter context - compare lowercase
+		if len(f.Args) >= 2 {
+			return strings.ToLower(arg0) == strings.ToLower(f.Args[1])
+		}
+	case FuncUcase:
+		// Ucase in filter context - compare uppercase
+		if len(f.Args) >= 2 {
+			return strings.ToUpper(arg0) == strings.ToUpper(f.Args[1])
+		}
+	case FuncReplace:
+		if len(f.Args) >= 3 {
+			return strings.ReplaceAll(arg0, f.Args[1], f.Args[2]) != arg0
+		}
+	case FuncIsURI:
+		if len(f.Args) >= 1 {
+			val := arg0
+			return strings.HasPrefix(val, "http://") || strings.HasPrefix(val, "https://") || strings.HasPrefix(val, "urn:")
+		}
+	case FuncIsLiteral:
+		if len(f.Args) >= 1 {
+			val := arg0
+			// Not a URI means it's likely a literal
+			return !strings.HasPrefix(val, "http://") && !strings.HasPrefix(val, "https://") && !strings.HasPrefix(val, "urn:")
+		}
+	case FuncStr:
+		// str() function returns the string representation
+		// Used in filter to compare strings
+		if len(f.Args) >= 2 {
+			return arg0 == f.Args[1]
+		}
+		return arg0 != ""
+	case FuncSubstr:
+		// In FILTER context, check if substring from position exists
+		if len(f.Args) >= 2 {
+			start, _ := strconv.Atoi(f.Args[1])
+			if start < len(arg0) {
+				return true // substring from position exists
+			}
+			return false
+		}
+	case FuncStrLen:
+		return len(arg0) > 0
+	case FuncYear, FuncMonth, FuncDay, FuncHours, FuncMinutes, FuncSeconds:
+		// Date extraction - basic check
+		return arg0 != ""
+	}
+
+	return true
 }
 
 func resolveValue(term string, binding map[string]string) string {
