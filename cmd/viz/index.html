@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Ontology Visualization</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; overflow: hidden; background: #f8f9fa; }
+    #graph { width: 100vw; height: 100vh; }
+    #controls { position: fixed; top: 10px; right: 10px; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.15); max-height: 90vh; overflow-y: auto; z-index: 100; min-width: 200px; }
+    #search { width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; box-sizing: border-box; }
+    h3 { margin: 0 0 10px 0; font-size: 14px; color: #333; }
+    .filter-group { margin-bottom: 15px; }
+    .filter-group label { display: block; font-size: 12px; margin: 3px 0; cursor: pointer; padding: 2px 4px; border-radius: 3px; }
+    .filter-group label:hover { background: #f0f0f0; }
+    .count { color: #888; font-size: 11px; }
+    svg { cursor: grab; }
+    svg:active { cursor: grabbing; }
+    .node circle { stroke: #fff; stroke-width: 2px; }
+    .node text { font-size: 12px; pointer-events: none; fill: #333; font-weight: 500; }
+    .link { stroke: #999; stroke-opacity: 0.6; stroke-width: 1.5px; }
+    .link:hover { stroke-opacity: 1; stroke-width: 2.5px; }
+    #stats { font-size: 12px; color: #666; margin-bottom: 10px; }
+    #legend { margin-top: 15px; padding-top: 10px; border-top: 1px solid #eee; }
+    .legend-item { display: flex; align-items: center; font-size: 11px; margin: 4px 0; }
+    .legend-color { width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; }
+    #title { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: #222; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <div id="title">Ontology Explorer</div>
+    <input type="text" id="search" placeholder="Search nodes...">
+    <div id="stats"></div>
+    <div class="filter-group">
+      <h3>Node Types</h3>
+      <div id="nodeTypes"></div>
+    </div>
+    <div class="filter-group">
+      <h3>Relationships</h3>
+      <div id="predicates"></div>
+    </div>
+    <div class="filter-group">
+      <h3>Namespaces</h3>
+      <div id="namespaces"></div>
+    </div>
+    <div id="legend">
+      <h3>Legend</h3>
+      <div id="legendItems"></div>
+    </div>
+  </div>
+  <div id="graph"></div>
+  <script>
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    let graphData = { nodes: [], edges: [] };
+    let simulation;
+    let svg, g, link, node;
+    let allNodes = [];
+    let allEdges = [];
+
+    const colorMap = {
+      class: "#22c55e",
+      objectProperty: "#3b82f6",
+      datatypeProperty: "#8b5cf6",
+      annotationProperty: "#f97316",
+      resource: "#64748b",
+      literal: "#a855f7"
+    };
+
+    d3.json("/api/graph").then(data => {
+      graphData = data;
+      allNodes = [...data.nodes];
+      allEdges = [...data.edges];
+      setupFilters();
+      setupLegend();
+      renderGraph();
+    });
+
+    function setupLegend() {
+      const legendDiv = document.getElementById('legendItems');
+      Object.entries(colorMap).forEach(([type, color]) => {
+        if (graphData.types.includes(type)) {
+          const label = type.replace(/([A-Z])/g, ' $1').trim();
+          legendDiv.innerHTML += `<div class="legend-item"><div class="legend-color" style="background:${color}"></div>${label}</div>`;
+        }
+      });
+    }
+
+    function setupFilters() {
+      const nodeTypeCounts = {};
+      graphData.nodes.forEach(n => { nodeTypeCounts[n.type] = (nodeTypeCounts[n.type] || 0) + 1; });
+
+      const predCounts = {};
+      graphData.edges.forEach(e => { predCounts[e.label] = (predCounts[e.label] || 0) + 1; });
+
+      const nsCounts = {};
+      graphData.nodes.forEach(n => { nsCounts[n.namespace] = (nsCounts[n.namespace] || 0) + 1; });
+
+      document.getElementById('stats').innerHTML =
+        `${graphData.nodes.length} nodes, ${graphData.edges.length} edges`;
+
+      const nodeDiv = document.getElementById('nodeTypes');
+      Object.entries(nodeTypeCounts).sort((a,b) => b[1] - a[1]).forEach(([type, count]) => {
+        const label = type.replace(/([A-Z])/g, ' $1').trim();
+        nodeDiv.innerHTML += `<label><input type="checkbox" checked data-nodetype="${type}"> ${label} <span class="count">(${count})</span></label>`;
+      });
+
+      const predDiv = document.getElementById('predicates');
+      Object.entries(predCounts).sort((a,b) => b[1] - a[1]).forEach(([pred, count]) => {
+        predDiv.innerHTML += `<label><input type="checkbox" checked data-predicate="${pred}"> ${pred} <span class="count">(${count})</span></label>`;
+      });
+
+      const nsDiv = document.getElementById('namespaces');
+      Object.entries(nsCounts).sort((a,b) => b[1] - a[1]).forEach(([ns, count]) => {
+        const shortNs = ns.length > 25 ? ns.slice(0,25) + '...' : ns;
+        nsDiv.innerHTML += `<label><input type="checkbox" checked data-namespace="${ns}"> ${shortNs} <span class="count">(${count})</span></label>`;
+      });
+
+      document.querySelectorAll('#nodeTypes input, #predicates input, #namespaces input').forEach(cb => {
+        cb.addEventListener('change', updateGraph);
+      });
+
+      document.getElementById('search').addEventListener('input', debounce(updateGraph, 300));
+    }
+
+    function debounce(fn, ms) {
+      let timer;
+      return function(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), ms);
+      };
+    }
+
+    function getFilters() {
+      const enabledNodeTypes = new Set();
+      document.querySelectorAll('#nodeTypes input:checked').forEach(cb => enabledNodeTypes.add(cb.dataset.nodetype));
+
+      const enabledPreds = new Set();
+      document.querySelectorAll('#predicates input:checked').forEach(cb => enabledPreds.add(cb.dataset.predicate));
+
+      const enabledNS = new Set();
+      document.querySelectorAll('#namespaces input:checked').forEach(cb => enabledNS.add(cb.dataset.namespace));
+
+      const search = document.getElementById('search').value.toLowerCase();
+
+      return { enabledNodeTypes, enabledPreds, enabledNS, search };
+    }
+
+    function renderGraph() {
+      document.getElementById('graph').innerHTML = '';
+      const { enabledNodeTypes, enabledPreds, enabledNS, search } = getFilters();
+
+      let nodes, edges;
+
+      if (search) {
+        // When searching, show all matching nodes and ALL their connected edges
+        nodes = allNodes.filter(n => n.label.toLowerCase().includes(search));
+        const nodeIds = new Set(nodes.map(n => n.id));
+        edges = allEdges.filter(e => nodeIds.has(e.source) || nodeIds.has(e.target));
+      } else {
+        // No search - use checkbox filters
+        nodes = allNodes.filter(n => enabledNodeTypes.has(n.type) && enabledNS.has(n.namespace));
+        const nodeIds = new Set(nodes.map(n => n.id));
+        edges = allEdges.filter(e => enabledPreds.has(e.label) && nodeIds.has(e.source) && nodeIds.has(e.target));
+      }
+
+      document.getElementById('stats').innerHTML = `${nodes.length} nodes, ${edges.length} edges`;
+
+      svg = d3.select("#graph").append("svg")
+        .attr("width", width).attr("height", height)
+        .call(d3.zoom().on("zoom", (event) => g.attr("transform", event.transform)));
+
+      g = svg.append("g");
+
+      link = g.selectAll(".link").data(edges).enter().append("line")
+        .attr("class", "link");
+
+      node = g.selectAll(".node").data(nodes).enter().append("g")
+        .attr("class", "node")
+        .call(d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended));
+
+      node.append("circle").attr("r", 10).attr("fill", d => colorMap[d.type] || "#999");
+
+      node.append("text").attr("dx", 12).attr("dy", ".35em").text(d => d.label);
+
+      node.append("title").text(d => `${d.label}\n${d.id}\nType: ${d.type}${d.comment ? '\n' + d.comment : ''}`);
+
+      link.append("title").text(d => `${d.label}\n${d.source} → ${d.target}`);
+
+      simulation = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(edges).id(d => d.id).distance(120))
+        .force("charge", d3.forceManyBody().strength(-400))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("collision", d3.forceCollide().radius(25))
+        .on("tick", () => {
+          link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+              .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+          node.attr("transform", d => `translate(${d.x},${d.y})`);
+        });
+    }
+
+    function updateGraph() {
+      if (simulation) simulation.stop();
+      renderGraph();
+    }
+
+    function dragstarted(event, d) {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      d.fx = d.x; d.fy = d.y;
+    }
+    function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
+    function dragended(event, d) {
+      if (!event.active) simulation.alphaTarget(0);
+      d.fx = null; d.fy = null;
+    }
+  </script>
+</body>
+</html>
