@@ -5,12 +5,27 @@ run:
   tests: true
 
 linters:
-  default: none
   enable:
     - govet
     - ineffassign
     - unused
     - misspell
+    - staticcheck
+  exclusions:
+    rules:
+      - path: skosast/builder.go
+        linters:
+          - unused
+        text: "termToString"
+      - linters:
+          - staticcheck
+        text: "QF1003"
+      - linters:
+          - staticcheck
+        text: "QF1001"
+      - linters:
+          - staticcheck
+        text: "QF1008"
 
 issues:
   max-issues-per-linter: 0

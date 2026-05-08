@@ -450,6 +450,18 @@ func parseValues(s string, q *ParsedQuery) string {
 func parseFilterExpr(content string) (Filter, error) {
 	content = strings.TrimSpace(content)
 
+	// Check for SPARQL functions: contains(?var, "value"), startsWith(?var, "value"), etc.
+	funcRe := regexp.MustCompile(`(?i)(\w+)\s*\((.+)\)`)
+	if m := funcRe.FindStringSubmatch(content); m != nil {
+		funcName := strings.ToLower(m[1])
+		argsStr := m[2]
+
+		filter := parseFilterFunction(funcName, argsStr)
+		if filter.Op == FilterFunction {
+			return filter, nil
+		}
+	}
+
 	// Check for regex(...)
 	regexRe := regexp.MustCompile(`(?i)regex\s*\(\s*([\?\$]\w+)\s*,\s*"([^"]+)"`)
 	if m := regexRe.FindStringSubmatch(content); m != nil {
@@ -481,6 +493,218 @@ func parseFilterExpr(content string) (Filter, error) {
 	}
 
 	return Filter{}, fmt.Errorf("unsupported FILTER expression: %s", content)
+}
+
+func parseFilterFunction(funcName, argsStr string) Filter {
+	args := splitFunctionArgs(argsStr)
+
+	switch funcName {
+	case "contains":
+		if len(args) >= 2 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncContains,
+				Args:     args,
+				FuncName: "contains",
+			}
+		}
+	case "strstarts", "startswith":
+		if len(args) >= 2 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncStrStarts,
+				Args:     args,
+				FuncName: "strstarts",
+			}
+		}
+	case "strends", "endswith":
+		if len(args) >= 2 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncStrEnds,
+				Args:     args,
+				FuncName: "strends",
+			}
+		}
+	case "lcase":
+		if len(args) >= 1 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncLcase,
+				Args:     args,
+				FuncName: "lcase",
+			}
+		}
+	case "ucase":
+		if len(args) >= 1 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncUcase,
+				Args:     args,
+				FuncName: "ucase",
+			}
+		}
+	case "replace":
+		if len(args) >= 3 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncReplace,
+				Args:     args,
+				FuncName: "replace",
+			}
+		}
+	case "str":
+		if len(args) >= 1 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncStr,
+				Args:     args,
+				FuncName: "str",
+			}
+		}
+	case "lang":
+		if len(args) >= 1 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncLang,
+				Args:     args,
+				FuncName: "lang",
+			}
+		}
+	case "datatype":
+		if len(args) >= 1 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncDatatype,
+				Args:     args,
+				FuncName: "datatype",
+			}
+		}
+	case "isuri", "is_uri":
+		if len(args) >= 1 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncIsURI,
+				Args:     args,
+				FuncName: "isuri",
+			}
+		}
+	case "isliteral":
+		if len(args) >= 1 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncIsLiteral,
+				Args:     args,
+				FuncName: "isliteral",
+			}
+		}
+	case "isblank", "is_blank":
+		if len(args) >= 1 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncIsBlank,
+				Args:     args,
+				FuncName: "isblank",
+			}
+		}
+	case "substr", "substring":
+		if len(args) >= 2 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncSubstr,
+				Args:     args,
+				FuncName: "substr",
+			}
+		}
+	case "strlen":
+		if len(args) >= 1 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncStrLen,
+				Args:     args,
+				FuncName: "strlen",
+			}
+		}
+	case "year":
+		if len(args) >= 1 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncYear,
+				Args:     args,
+				FuncName: "year",
+			}
+		}
+	case "month":
+		if len(args) >= 1 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncMonth,
+				Args:     args,
+				FuncName: "month",
+			}
+		}
+	case "day":
+		if len(args) >= 1 {
+			return Filter{
+				Op:       FilterFunction,
+				Func:     FuncDay,
+				Args:     args,
+				FuncName: "day",
+			}
+		}
+	}
+
+	return Filter{}
+}
+
+func splitFunctionArgs(argsStr string) []string {
+	var args []string
+	var current strings.Builder
+	depth := 0
+	inString := false
+
+	for i := 0; i < len(argsStr); i++ {
+		c := argsStr[i]
+
+		if c == '"' && (i == 0 || argsStr[i-1] != '\\') {
+			inString = !inString
+			current.WriteByte(c)
+			continue
+		}
+		if inString {
+			current.WriteByte(c)
+			continue
+		}
+
+		if c == '(' {
+			depth++
+			current.WriteByte(c)
+		} else if c == ')' {
+			depth--
+			current.WriteByte(c)
+		} else if c == ',' && depth == 0 {
+			arg := strings.TrimSpace(current.String())
+			if arg != "" {
+				args = append(args, arg)
+			}
+			current.Reset()
+		} else {
+			current.WriteByte(c)
+		}
+	}
+
+	// Add last argument
+	arg := strings.TrimSpace(current.String())
+	if arg != "" {
+		args = append(args, arg)
+	}
+
+	// Clean up each argument (remove quotes from string literals)
+	for i, a := range args {
+		args[i] = cleanFilterValue(a)
+	}
+
+	return args
 }
 
 func cleanFilterValue(s string) string {

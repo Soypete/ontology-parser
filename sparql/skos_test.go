@@ -612,7 +612,7 @@ func TestSKOSIntegration_FromTTLFile(t *testing.T) {
 	if err != nil {
 		t.Skipf("SKOS test file not found: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	p := ttl.NewTurtleParser()
 	triples, err := p.Parse(f)

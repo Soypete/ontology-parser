@@ -12,7 +12,7 @@ import (
 func TestFetcher_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("hello world"))
+		_, _ = w.Write([]byte("hello world"))
 	}))
 	defer server.Close()
 
@@ -62,7 +62,7 @@ func TestFetcher_500(t *testing.T) {
 func TestFetcher_Timeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)
-		w.Write([]byte("too slow"))
+		_, _ = w.Write([]byte("too slow"))
 	}))
 	defer server.Close()
 
@@ -98,7 +98,7 @@ func TestFetcher_NotURI(t *testing.T) {
 func TestFetcher_ContentType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rdf+xml")
-		w.Write([]byte("<rdf>data</rdf>"))
+		_, _ = w.Write([]byte("<rdf>data</rdf>"))
 	}))
 	defer server.Close()
 
@@ -115,7 +115,7 @@ func TestFetcher_FetchAll(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("data for " + r.URL.Path))
+		_, _ = w.Write([]byte("data for " + r.URL.Path))
 	}))
 	defer server.Close()
 

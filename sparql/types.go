@@ -59,13 +59,47 @@ const (
 	FilterEquals    FilterOp = iota // ?x = "value"
 	FilterNotEquals                 // ?x != "value"
 	FilterRegex                     // regex(?x, "pattern")
+	FilterFunction                  // filter function call
+)
+
+// FilterFunctionType represents the type of SPARQL filter function.
+type FilterFunctionType int
+
+const (
+	FuncContains FilterFunctionType = iota
+	FuncStartsWith
+	FuncEndsWith
+	FuncLcase
+	FuncUcase
+	FuncReplace
+	FuncStr
+	FuncLang
+	FuncDatatype
+	FuncIsURI
+	FuncIsLiteral
+	FuncIsBlank
+	FuncStrStarts
+	FuncStrEnds
+	FuncStrContains
+	FuncSubstr
+	FuncStrLen
+	FuncConcat
+	FuncYear
+	FuncMonth
+	FuncDay
+	FuncHours
+	FuncMinutes
+	FuncSeconds
 )
 
 // Filter represents a FILTER condition in a WHERE clause.
 type Filter struct {
-	Op    FilterOp
-	Left  string // variable or value
-	Right string // value or regex pattern
+	Op       FilterOp
+	Left     string             // variable or value (for =, !=)
+	Right    string             // value or regex pattern (for =, !=)
+	Func     FilterFunctionType // function type (for FilterFunction)
+	Args     []string           // function arguments
+	FuncName string             // original function name for debugging
 }
 
 // GraphPattern represents a graph pattern which can be either basic triples or a UNION group.
