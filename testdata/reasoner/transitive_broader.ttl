@@ -1,0 +1,13 @@
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix ex: <http://example.org/> .
+
+ex:course a skos:Concept ;
+    skos:prefLabel "Course"@en .
+
+ex:onlineCourse a skos:Concept ;
+    skos:prefLabel "Online Course"@en ;
+    skos:broader ex:course .
+
+ex:selfPaced a skos:Concept ;
+    skos:prefLabel "Self-Paced"@en ;
+    skos:broader ex:onlineCourse .

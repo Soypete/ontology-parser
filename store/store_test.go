@@ -221,7 +221,7 @@ func TestMemoryStore_WithParsedFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open fixture: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	parser := rdf.NewXMLParser("foaf")
 	triples, err := parser.Parse(f)

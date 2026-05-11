@@ -52,7 +52,7 @@ func (r *Reader) detectFormat() (Format, error) {
 	if err != nil {
 		return FormatUnknown, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	lines := 0
@@ -115,7 +115,7 @@ func (r *Reader) Parse() ([]types.Triple, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	return parser.Parse(f)
 }
