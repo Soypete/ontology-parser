@@ -1,0 +1,6 @@
+.ontosite/
+test-output/
+ontology-site
+ontology-serve
+docs/screenshots/*.png
+*.exe

@@ -47,6 +47,8 @@ var (
 	rdfType        = types.RDFType
 	rdfsSubClass   = types.RDFSSubClassOf
 	rdfsSubProp    = types.RDFSSubPropertyOf
+	rdfsDomain     = types.RDFSdomain
+	rdfsRange      = types.RDFSRange
 	owlClass       = types.OWLClass
 	skosBroader    = "http://www.w3.org/2004/02/skos/core#broader"
 	skosNarrower   = "http://www.w3.org/2004/02/skos/core#narrower"
@@ -68,6 +70,8 @@ var edgeTypes = map[string]string{
 	types.RDFType:                                    "rdf:type",
 	types.RDFSSubClassOf:                             "rdfs:subClassOf",
 	types.RDFSSubPropertyOf:                          "rdfs:subPropertyOf",
+	types.RDFSdomain:                                 "rdfs:domain",
+	types.RDFSRange:                                  "rdfs:range",
 	types.OWLEquivalentClass:                         "owl:equivalentClass",
 	types.OWLEquivalentProperty:                      "owl:equivalentProperty",
 	types.OWLInverseOf:                               "owl:inverseOf",
@@ -190,6 +194,8 @@ var edgePredicates = map[string]bool{
 	rdfType:                     false, // only for node typing, not edges
 	rdfsSubClass:                true,
 	rdfsSubProp:                 true,
+	rdfsDomain:                  true,
+	rdfsRange:                   true,
 	types.OWLEquivalentClass:    true,
 	types.OWLEquivalentProperty: true,
 	types.OWLInverseOf:          true,

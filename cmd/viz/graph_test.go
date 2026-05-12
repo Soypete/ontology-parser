@@ -118,3 +118,50 @@ func TestGraph_ToJSON(t *testing.T) {
 		t.Error("expected non-empty JSON")
 	}
 }
+
+func TestGraph_DomainRangeEdges(t *testing.T) {
+	g := NewGraph()
+
+	triples := []types.Triple{
+		{Subject: "http://example.org/hasSyllabus", Predicate: types.RDFType, Object: types.OWLObjectProperty, IsLiteral: false},
+		{Subject: "http://example.org/hasSyllabus", Predicate: types.RDFSdomain, Object: "http://example.org/Course", IsLiteral: false},
+		{Subject: "http://example.org/hasSyllabus", Predicate: types.RDFSRange, Object: "http://example.org/Syllabus", IsLiteral: false},
+		{Subject: "http://example.org/Course", Predicate: types.RDFType, Object: types.OWLClass, IsLiteral: false},
+		{Subject: "http://example.org/Syllabus", Predicate: types.RDFType, Object: types.OWLClass, IsLiteral: false},
+	}
+
+	g.ProcessTriples(triples)
+
+	domainEdges := 0
+	rangeEdges := 0
+	for _, e := range g.Edges {
+		if e.Label == "rdfs:domain" {
+			domainEdges++
+		}
+		if e.Label == "rdfs:range" {
+			rangeEdges++
+		}
+	}
+
+	if domainEdges != 1 {
+		t.Errorf("expected 1 rdfs:domain edge, got %d", domainEdges)
+	}
+	if rangeEdges != 1 {
+		t.Errorf("expected 1 rdfs:range edge, got %d", rangeEdges)
+	}
+
+	nodeLabels := map[string]string{}
+	for _, n := range g.Nodes {
+		nodeLabels[n.Label] = n.ID
+	}
+
+	if nodeLabels["Course"] == "" {
+		t.Error("expected Course node to exist")
+	}
+	if nodeLabels["Syllabus"] == "" {
+		t.Error("expected Syllabus node to exist")
+	}
+	if nodeLabels["hasSyllabus"] == "" {
+		t.Error("expected hasSyllabus node to exist")
+	}
+}
