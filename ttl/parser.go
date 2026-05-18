@@ -70,7 +70,7 @@ func (p *TurtleParser) ParseFile(path string) ([]types.Triple, error) {
 	if err != nil {
 		return nil, fmt.Errorf("turtle: open error: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return p.Parse(bufio.NewReader(f))
 }
 

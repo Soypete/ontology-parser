@@ -4,3 +4,5 @@ ontology-site
 ontology-serve
 docs/screenshots/*.png
 *.exe
+
+ontology-viz

@@ -441,12 +441,12 @@ func evaluateFilterFunction(f Filter, binding map[string]string) bool {
 	case FuncLcase:
 		// Lcase in filter context - compare lowercase
 		if len(f.Args) >= 2 {
-			return strings.ToLower(arg0) == strings.ToLower(f.Args[1])
+		return strings.ToLower(arg0) == strings.ToLower(f.Args[1])
 		}
 	case FuncUcase:
 		// Ucase in filter context - compare uppercase
 		if len(f.Args) >= 2 {
-			return strings.ToUpper(arg0) == strings.ToUpper(f.Args[1])
+		return strings.ToUpper(arg0) == strings.ToUpper(f.Args[1])
 		}
 	case FuncReplace:
 		if len(f.Args) >= 3 {

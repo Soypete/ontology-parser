@@ -16,7 +16,7 @@ func setupFOAFStore(t *testing.T) store.Store {
 	if err != nil {
 		t.Fatalf("failed to open foaf fixture: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	parser := rdf.NewXMLParser("foaf")
 	triples, err := parser.Parse(f)
@@ -39,7 +39,7 @@ func setupWikidataStore(t *testing.T) store.Store {
 	if err != nil {
 		t.Fatalf("failed to open wikidata fixture: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	parser := rdf.NewXMLParser("wikidata")
 	triples, err := parser.Parse(f)

@@ -1,0 +1,9 @@
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix ex: <http://example.org/> .
+
+ex:math a skos:Concept ;
+    skos:prefLabel "Mathematics"@en ;
+    skos:related ex:science .
+
+ex:science a skos:Concept ;
+    skos:prefLabel "Science"@en .
