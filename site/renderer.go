@@ -20,6 +20,7 @@ const (
 	rdfsClass             = "http://www.w3.org/2000/01/rdf-schema#Class"
 	rdfsSubClassOf        = "http://www.w3.org/2000/01/rdf-schema#subClassOf"
 	rdfsLabel             = "http://www.w3.org/2000/01/rdf-schema#label"
+	rdfsComment           = "http://www.w3.org/2000/01/rdf-schema#comment"
 	owlClass              = "http://www.w3.org/2002/07/owl#Class"
 	owlObjectProperty     = "http://www.w3.org/2002/07/owl#ObjectProperty"
 	owlDatatypeProperty   = "http://www.w3.org/2002/07/owl#DatatypeProperty"
@@ -27,6 +28,7 @@ const (
 	skosConceptScheme     = "http://www.w3.org/2004/02/skos/core#ConceptScheme"
 	skosConcept           = "http://www.w3.org/2004/02/skos/core#Concept"
 	skosHasTopConcept     = "http://www.w3.org/2004/02/skos/core#hasTopConcept"
+	skosDefinition        = "http://www.w3.org/2004/02/skos/core#definition"
 )
 
 type Config struct {
@@ -135,6 +137,29 @@ func (r *Renderer) extractMetadata() {
 			if s, ok := schemeMap[t.Subject]; ok {
 				s.Label = t.Object
 				schemeMap[t.Subject] = s
+			}
+		}
+
+		// rdfs:comment populates Description as a fallback.
+		// skos:definition (handled next) takes precedence when present.
+		if t.Predicate == rdfsComment && t.IsLiteral {
+			if c, ok := classMap[t.Subject]; ok && c.Description == "" {
+				c.Description = t.Object
+				classMap[t.Subject] = c
+			}
+			if p, ok := propertyMap[t.Subject]; ok && p.Description == "" {
+				p.Description = t.Object
+				propertyMap[t.Subject] = p
+			}
+		}
+		if t.Predicate == skosDefinition && t.IsLiteral {
+			if c, ok := classMap[t.Subject]; ok {
+				c.Description = t.Object
+				classMap[t.Subject] = c
+			}
+			if p, ok := propertyMap[t.Subject]; ok {
+				p.Description = t.Object
+				propertyMap[t.Subject] = p
 			}
 		}
 
@@ -745,6 +770,7 @@ const classesTemplate = `<!DOCTYPE html>
             <tr>
                 <th>Name</th>
                 <th>Label</th>
+                <th>Description</th>
                 <th>SubClass Of</th>
             </tr>
         </thead>
@@ -753,6 +779,7 @@ const classesTemplate = `<!DOCTYPE html>
             <tr>
                 <td><a href="#">{{.Name}}</a></td>
                 <td>{{.Label}}</td>
+                <td>{{if .Description}}{{.Description}}{{else}}<span class="empty">-</span>{{end}}</td>
                 <td>{{if .SubClassOf}}{{.SubClassOf}}{{else}}<span class="empty">-</span>{{end}}</td>
             </tr>
             {{end}}
@@ -784,6 +811,7 @@ const propertiesTemplate = `<!DOCTYPE html>
         .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.85em; }
         .tag-object { background: #e3f2fd; color: #1565c0; }
         .tag-datatype { background: #e8f5e9; color: #2e7d32; }
+        .empty { color: #666; font-style: italic; }
     </style>
 </head>
 <body>
@@ -797,6 +825,7 @@ const propertiesTemplate = `<!DOCTYPE html>
             <tr>
                 <th>Name</th>
                 <th>Label</th>
+                <th>Description</th>
                 <th>Type</th>
             </tr>
         </thead>
@@ -805,6 +834,7 @@ const propertiesTemplate = `<!DOCTYPE html>
             <tr>
                 <td><a href="#">{{.Name}}</a></td>
                 <td>{{.Label}}</td>
+                <td>{{if .Description}}{{.Description}}{{else}}<span class="empty">-</span>{{end}}</td>
                 <td>{{if .IsDatatype}}<span class="tag tag-datatype">Datatype</span>{{else}}<span class="tag tag-object">Object</span>{{end}}</td>
             </tr>
             {{end}}
