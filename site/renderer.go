@@ -1270,9 +1270,7 @@ const vizTemplate = `<!DOCTYPE html>
 
     function shouldShowLabel(d) {
       if (selectedNode && highlightedNodes.has(d.id)) return true;
-      if (d.type === "class") return true;
-      if (currentZoom > 1.0) return true;
-      return false;
+      return true;
     }
 
     function renderGraph() {
