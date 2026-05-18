@@ -110,15 +110,24 @@ func (r *Renderer) extractMetadata() {
 		if t.Predicate == rdfType {
 			switch t.Object {
 			case rdfsClass, owlClass, skosConcept:
+				if strings.HasPrefix(t.Subject, "_:") {
+					continue
+				}
 				if _, ok := classMap[t.Subject]; !ok {
 					classMap[t.Subject] = ClassInfo{Name: r.localName(t.Subject), URI: t.Subject}
 				}
 			case "http://www.w3.org/1999/02/22-rdf-syntax-ns#Property", owlObjectProperty, owlDatatypeProperty, owlAnnotationProperty:
+				if strings.HasPrefix(t.Subject, "_:") {
+					continue
+				}
 				if _, ok := propertyMap[t.Subject]; !ok {
 					p := PropertyInfo{Name: r.localName(t.Subject), URI: t.Subject, IsDatatype: t.Object == owlDatatypeProperty}
 					propertyMap[t.Subject] = p
 				}
 			case skosConceptScheme:
+				if strings.HasPrefix(t.Subject, "_:") {
+					continue
+				}
 				if _, ok := schemeMap[t.Subject]; !ok {
 					schemeMap[t.Subject] = SchemeInfo{Name: r.localName(t.Subject), URI: t.Subject}
 				}
@@ -1261,8 +1270,7 @@ const vizTemplate = `<!DOCTYPE html>
 
     function shouldShowLabel(d) {
       if (selectedNode && highlightedNodes.has(d.id)) return true;
-      if (currentZoom > 1.5) return true;
-      return false;
+      return true;
     }
 
     function renderGraph() {
@@ -1368,14 +1376,24 @@ const vizTemplate = `<!DOCTYPE html>
       }
 
       simulation = d3.forceSimulation(nodes)
-        .force("link", d3.forceLink(edges).id(d => d.id).distance(120))
-        .force("charge", d3.forceManyBody().strength(-150))
+        .force("link", d3.forceLink(edges).id(d => d.id).distance(70))
+        .force("charge", d3.forceManyBody().strength(-250))
         .force("center", d3.forceCenter(width / 2, height / 2))
         .force("collision", d3.forceCollide().radius(25))
         .on("tick", () => {
           link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
               .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
           node.attr("transform", d => 'translate(' + d.x + ',' + d.y + ')');
+        })
+        .on("end", () => {
+          const bounds = g.node().getBBox();
+          const fullWidth = bounds.width;
+          const fullHeight = bounds.height;
+          const midX = bounds.x + fullWidth / 2;
+          const midY = bounds.y + fullHeight / 2;
+          const scale = 0.8 / Math.max(fullWidth / width, fullHeight / height);
+          const translate = [width / 2 - scale * midX, height / 2 - scale * midY];
+          svg.call(zoom.transform, d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
         });
 
       svg.on("click", () => {
