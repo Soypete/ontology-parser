@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Ontology Visualization</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; overflow: hidden; background: #f8f9fa; }
+    #graph { width: 100vw; height: 100vh; }
+    #controls { position: fixed; top: 10px; right: 10px; background: #fff; padding: 0; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.15); max-height: 90vh; overflow-y: auto; z-index: 100; width: 50px; min-height: 40px; transition: width 0.2s ease; overflow: hidden; border: 2px solid #333; }
+    #controls.expanded { width: 320px; padding: 15px; }
+    #controls.collapsed .filter-group, #controls.collapsed #search, #controls.collapsed #legend { display: none; }
+    #toggleBtn { position: absolute; top: 8px; left: 10px; width: 20px; height: 20px; cursor: pointer; display: flex; flex-direction: column; justify-content: space-around; padding: 2px; }
+    #toggleBtn span { display: block; width: 100%; height: 3px; background: #333; border-radius: 1px; }
+    #search { width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; box-sizing: border-box; display: none; }
+    #controls.expanded #search { display: block; }
+    h3 { margin: 0 0 10px 0; font-size: 14px; color: #333; }
+    .filter-group { margin-bottom: 15px; }
+    .filter-group label { display: block; font-size: 12px; margin: 3px 0; cursor: pointer; padding: 2px 4px; border-radius: 3px; }
+    .filter-group label:hover { background: #f0f0f0; }
+    .count { color: #888; font-size: 11px; }
+    svg { cursor: grab; }
+    svg:active { cursor: grabbing; }
+    .node circle { stroke: #fff; stroke-width: 2px; }
+    .node text { font-size: 12px; pointer-events: none; fill: #333; font-weight: 500; display: none; paint-order: stroke; stroke: white; stroke-width: 3px; }
+    .link { stroke: #999; stroke-opacity: 0.6; stroke-width: 1.5px; }
+    .link.faded { stroke-opacity: 0.1; }
+    .node.faded { opacity: 0.15; }
+    .node text.visible { display: block; }
+    .node.highlighted circle { stroke: #000; stroke-width: 3px; }
+    .node.neighbor text.visible { display: block; }
+    #stats { font-size: 12px; color: #666; margin-bottom: 10px; display: none; }
+    #controls.expanded #stats { display: block; }
+    #legend { margin-top: 15px; padding-top: 10px; border-top: 1px solid #eee; display: none; }
+    #controls.expanded #legend { display: block; }
+    .legend-item { display: flex; align-items: center; font-size: 11px; margin: 4px 0; }
+    .legend-color { width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; }
+    #title { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: #222; display: none; }
+    #controls.expanded #title { display: block; }
+    #topBar { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 15px; background: #fff; padding: 8px 16px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.15); z-index: 100; }
+    #topBar label { font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+    #topBar input[type="checkbox"] { cursor: pointer; }
+    .view-toggle { display: none; margin-bottom: 10px; }
+    #controls.expanded .view-toggle { display: flex; gap: 10px; }
+    .view-toggle label { font-size: 12px; cursor: pointer; }
+    #isolateToggle { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; }
+    #controls.expanded #isolateToggle { display: block; }
+    #titleBar { display: flex; align-items: center; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <div id="topBar">
+    <label><input type="checkbox" id="showLabels" checked> Show labels</label>
+  </div>
+  <div id="controls" class="collapsed">
+    <div id="toggleBtn"><span></span><span></span><span></span></div>
+    <div id="titleBar"><div id="title">Ontology Explorer</div></div>
+    <div id="stats"></div>
+    <input type="text" id="search" placeholder="Search nodes...">
+    <div class="view-toggle">
+      <label><input type="radio" name="viewMode" value="all" checked> All</label>
+      <label><input type="radio" name="viewMode" value="namespace"> By Namespace</label>
+    </div>
+    <div class="filter-group">
+      <h3>Node Types</h3>
+      <div id="nodeTypes"></div>
+    </div>
+    <div class="filter-group">
+      <h3>Relationships</h3>
+      <div id="predicates"></div>
+    </div>
+    <div class="filter-group">
+      <h3>Namespaces</h3>
+      <div id="namespaces"></div>
+    </div>
+    <div id="isolateToggle">
+      <label><input type="checkbox" id="isolateMode"> Isolate (hide faded)</label>
+    </div>
+    <div id="legend">
+      <h3>Legend</h3>
+      <div id="legendItems"></div>
+    </div>
+  </div>
+  <div id="graph"></div>
+  <script>
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    let graphData = { nodes: [], edges: [] };
+    let simulation;
+    let svg, g, link, node;
+    let allNodes = [];
+    let allEdges = [];
+    let selectedNode = null;
+    let currentZoom = 1;
+    let highlightMode = 0; // 0 = none, 1 = 1-hop, 2 = 2-hop
+    let highlightedNodes = new Set();
+    let highlightedEdges = new Set();
+    let showLabels = true;
+    const ZOOM_THRESHOLD = 0.4;
+    const PROPERTY_TYPES = new Set(["objectProperty", "datatypeProperty", "annotationProperty"]);
+
+    const colorMap = {
+      class: "#22c55e",
+      objectProperty: "#3b82f6",
+      datatypeProperty: "#8b5cf6",
+      annotationProperty: "#f97316",
+      resource: "#64748b",
+      literal: "#a855f7"
+    };
+
+    const edgeColorMap = {
+      "rdfs:domain": "#ef4444",
+      "rdfs:range": "#f59e0b",
+      "rdfs:subClassOf": "#22c55e",
+      "rdfs:subPropertyOf": "#3b82f6",
+      "owl:inverseOf": "#8b5cf6",
+      "owl:equivalentClass": "#ec4899",
+      "owl:equivalentProperty": "#ec4899"
+    };
+
+    const dashedPredicates = new Set(["rdfs:domain", "rdfs:range"]);
+
+    d3.json("/api/graph").then(data => {
+      graphData = data;
+      allNodes = [...data.nodes];
+      allEdges = [...data.edges];
+      setupControls();
+      setupLegend();
+      renderGraph();
+    });
+
+    function setupControls() {
+      document.getElementById('toggleBtn').addEventListener('click', () => {
+        const c = document.getElementById('controls');
+        c.classList.toggle('collapsed');
+        c.classList.toggle('expanded');
+        document.getElementById('toggleBtn').textContent = c.classList.contains('expanded') ? '✕' : '☰';
+      });
+
+      const nodeTypeCounts = {};
+      graphData.nodes.forEach(n => {
+        const type = n.type || "untyped";
+        nodeTypeCounts[type] = (nodeTypeCounts[type] || 0) + 1;
+      });
+
+      const predCounts = {};
+      graphData.edges.forEach(e => { predCounts[e.label] = (predCounts[e.label] || 0) + 1; });
+
+      const nsCounts = {};
+      graphData.nodes.forEach(n => { nsCounts[n.namespace] = (nsCounts[n.namespace] || 0) + 1; });
+
+      document.getElementById('stats').innerHTML =
+        `${graphData.nodes.length} nodes, ${graphData.edges.length} edges`;
+
+      const nodeDiv = document.getElementById('nodeTypes');
+      Object.entries(nodeTypeCounts).sort((a,b) => b[1] - a[1]).forEach(([type, count]) => {
+        const label = type === "untyped" ? "(untyped)" : type.replace(/([A-Z])/g, ' $1').trim();
+        nodeDiv.innerHTML += `<label><input type="checkbox" checked data-nodetype="${type}"> ${label} <span class="count">(${count})</span></label>`;
+      });
+
+      const predDiv = document.getElementById('predicates');
+      Object.entries(predCounts).sort((a,b) => b[1] - a[1]).forEach(([pred, count]) => {
+        predDiv.innerHTML += `<label><input type="checkbox" checked data-predicate="${pred}"> ${pred} <span class="count">(${count})</span></label>`;
+      });
+
+      const nsDiv = document.getElementById('namespaces');
+      Object.entries(nsCounts).sort((a,b) => b[1] - a[1]).forEach(([ns, count]) => {
+        const shortNs = getShortNamespace(ns);
+        const title = ns !== shortNs ? `title="${ns}"` : '';
+        nsDiv.innerHTML += `<label ${title}><input type="checkbox" checked data-namespace="${ns}"> ${shortNs} <span class="count">(${count})</span></label>`;
+      });
+
+      document.querySelectorAll('#nodeTypes input, #predicates input, #namespaces input').forEach(cb => {
+        cb.addEventListener('change', updateGraph);
+      });
+
+      document.getElementById('search').addEventListener('input', debounce(updateGraph, 300));
+
+      document.querySelectorAll('input[name="viewMode"]').forEach(rb => {
+        rb.addEventListener('change', (e) => {
+          if (e.target.value === 'namespace') {
+            document.querySelectorAll('#namespaces input').forEach(cb => cb.checked = false);
+            if (graphData.namespaces.length > 0) {
+              document.querySelector(`#namespaces input[data-namespace="${graphData.namespaces[0]}"]`).checked = true;
+            }
+          } else {
+            document.querySelectorAll('#namespaces input').forEach(cb => cb.checked = true);
+          }
+          updateGraph();
+        });
+      });
+
+      document.getElementById('isolateMode').addEventListener('change', updateGraph);
+
+      document.getElementById('showLabels').addEventListener('change', (e) => {
+        showLabels = e.target.checked;
+        if (simulation) {
+          node.selectAll("text").classed("visible", d => shouldShowLabel(d));
+        }
+      });
+    }
+
+    function setupLegend() {
+      const legendDiv = document.getElementById('legendItems');
+      Object.entries(colorMap).forEach(([type, color]) => {
+        if (graphData.types.includes(type)) {
+          const label = type.replace(/([A-Z])/g, ' $1').trim();
+          legendDiv.innerHTML += `<div class="legend-item"><div class="legend-color" style="background:${color}"></div>${label}</div>`;
+        }
+      });
+    }
+
+    function getShortNamespace(ns) {
+      if (!ns || ns === "_") return "blank node";
+      const lastHash = ns.lastIndexOf('#');
+      const lastSlash = ns.lastIndexOf('/');
+      const sep = Math.max(lastHash, lastSlash);
+      if (sep > 0 && sep < ns.length - 1) {
+        return ns.substring(sep + 1) || ns;
+      }
+      return ns;
+    }
+
+    function debounce(fn, ms) {
+      let timer;
+      return function(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), ms);
+      };
+    }
+
+    function getFilters() {
+      const enabledNodeTypes = new Set();
+      document.querySelectorAll('#nodeTypes input:checked').forEach(cb => enabledNodeTypes.add(cb.dataset.nodetype));
+
+      const enabledPreds = new Set();
+      document.querySelectorAll('#predicates input:checked').forEach(cb => enabledPreds.add(cb.dataset.predicate));
+
+      const enabledNS = new Set();
+      document.querySelectorAll('#namespaces input:checked').forEach(cb => enabledNS.add(cb.dataset.namespace));
+
+      const search = document.getElementById('search').value.toLowerCase();
+
+      return { enabledNodeTypes, enabledPreds, enabledNS, search };
+    }
+
+    function getNeighbors(nodeId, hops) {
+      const neighbors = new Set();
+      const visited = new Set([nodeId]);
+      let current = [nodeId];
+
+      for (let h = 0; h < hops; h++) {
+        const next = [];
+        current.forEach(id => {
+          allEdges.forEach(e => {
+            if (e.source === id && !visited.has(e.target)) {
+              visited.add(e.target);
+              neighbors.add(e.target);
+              next.push(e.target);
+            }
+            if (e.target === id && !visited.has(e.source)) {
+              visited.add(e.source);
+              neighbors.add(e.source);
+              next.push(e.source);
+            }
+          });
+        });
+        current = next;
+      }
+      return neighbors;
+    }
+
+    function shouldShowLabel(d) {
+      if (!showLabels) return false;
+      if (selectedNode && highlightedNodes.has(d.id)) return true;
+      if (currentZoom > 1.5) return true;
+      if (currentZoom < ZOOM_THRESHOLD) {
+        return d.type === "class";
+      }
+      return true;
+    }
+
+    function renderGraph() {
+      document.getElementById('graph').innerHTML = '';
+      const { enabledNodeTypes, enabledPreds, enabledNS, search } = getFilters();
+      const isolateMode = document.getElementById('isolateMode').checked;
+
+      let nodes, edges;
+      const allNodeIds = new Set(allNodes.map(n => n.id));
+
+      if (search) {
+        nodes = allNodes.filter(n => n.label.toLowerCase().includes(search));
+        const nodeIds = new Set(nodes.map(n => n.id));
+        edges = allEdges.filter(e => nodeIds.has(e.source) || nodeIds.has(e.target));
+      } else {
+        nodes = allNodes.filter(n => {
+          const type = n.type || "untyped";
+          return enabledNodeTypes.has(type) && enabledNS.has(n.namespace);
+        });
+        const nodeIds = new Set(nodes.map(n => n.id));
+
+        edges = allEdges.filter(e => {
+          if (!enabledPreds.has(e.label)) return false;
+          const sourceInFiltered = nodeIds.has(e.source);
+          const targetInFiltered = nodeIds.has(e.target);
+          const sourceExists = allNodeIds.has(e.source);
+          const targetExists = allNodeIds.has(e.target);
+          return (sourceInFiltered && targetExists) || (targetInFiltered && sourceExists) || (sourceInFiltered && targetInFiltered);
+        });
+      }
+
+      // Apply highlight mode
+      if (highlightMode > 0 && selectedNode) {
+        const neighbors = getNeighbors(selectedNode, highlightMode);
+        highlightedNodes = new Set([selectedNode, ...neighbors]);
+        highlightedEdges = new Set();
+        edges.forEach(e => {
+          if (highlightedNodes.has(e.source) && highlightedNodes.has(e.target)) {
+            highlightedEdges.add(e.id || `${e.source}-${e.target}`);
+          }
+        });
+      } else {
+        highlightedNodes = new Set();
+        highlightedEdges = new Set();
+      }
+
+      // Apply fade for non-highlighted
+      if (highlightedNodes.size > 0) {
+        if (isolateMode) {
+          nodes = nodes.filter(n => highlightedNodes.has(n.id));
+          edges = edges.filter(e => highlightedEdges.has(e.id || `${e.source}-${e.target}`));
+        }
+      }
+
+      document.getElementById('stats').innerHTML = `${nodes.length} nodes, ${edges.length} edges`;
+
+      svg = d3.select("#graph").append("svg")
+        .attr("width", width).attr("height", height)
+        .call(d3.zoom().on("zoom", (event) => {
+          currentZoom = event.transform.k;
+          g.attr("transform", event.transform);
+          node.selectAll("text").classed("visible", d => shouldShowLabel(d));
+        }));
+
+      g = svg.append("g");
+
+      link = g.selectAll(".link").data(edges).enter().append("line")
+        .attr("class", "link")
+        .attr("stroke", d => edgeColorMap[d.label] || "#999")
+        .attr("stroke-dasharray", d => dashedPredicates.has(d.label) ? "5,5" : "none");
+
+      node = g.selectAll(".node").data(nodes).enter().append("g")
+        .attr("class", "node")
+        .call(d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended))
+        .on("click", (event, d) => {
+          event.stopPropagation();
+          selectedNode = d.id;
+          highlightMode = 1;
+          renderGraph();
+        })
+        .on("dblclick", (event, d) => {
+          event.stopPropagation();
+          selectedNode = d.id;
+          highlightMode = 2;
+          renderGraph();
+        });
+
+      node.append("circle").attr("r", 10).attr("fill", d => colorMap[d.type] || "#999");
+
+      node.append("text").attr("dx", 12).attr("dy", ".35em")
+        .text(d => d.label)
+        .classed("visible", d => shouldShowLabel(d));
+
+      node.append("title").text(d => `${d.label}\n${d.id}\nType: ${d.type}${d.comment ? '\n' + d.comment : ''}`);
+
+      link.append("title").text(d => `${d.label}\n${d.source} → ${d.target}`);
+
+      // Apply highlight classes
+      node.classed("highlighted", d => d.id === selectedNode)
+          .classed("neighbor", d => d.id !== selectedNode && highlightedNodes.has(d.id));
+
+      if (highlightedNodes.size > 0) {
+        const isIsolated = isolateMode;
+        node.classed("faded", d => !highlightedNodes.has(d.id) && !isIsolated);
+        link.classed("faded", d => !highlightedEdges.has(d.id || `${d.source}-${d.target}`));
+      }
+
+      simulation = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(edges).id(d => d.id).distance(120))
+        .force("charge", d3.forceManyBody().strength(-150))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("collision", d3.forceCollide().radius(25))
+        .on("tick", () => {
+          link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+              .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+          node.attr("transform", d => `translate(${d.x},${d.y})`);
+        });
+
+      // Click on empty canvas to clear selection
+      svg.on("click", () => {
+        selectedNode = null;
+        highlightMode = 0;
+        highlightedNodes = new Set();
+        highlightedEdges = new Set();
+        node.classed("faded", false).classed("highlighted", false).classed("neighbor", false);
+        link.classed("faded", false);
+      });
+    }
+
+    function updateGraph() {
+      if (simulation) simulation.stop();
+      renderGraph();
+    }
+
+    function dragstarted(event, d) {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      d.fx = d.x; d.fy = d.y;
+    }
+    function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
+    function dragended(event, d) {
+      if (!event.active) simulation.alphaTarget(0);
+      d.fx = null; d.fy = null;
+    }
+  </script>
+</body>
+</html>
